@@ -79,9 +79,10 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .85em;
 }
 .brand { display: flex; align-items: center; gap: .55rem; font-weight: 600; white-space: nowrap; flex: 1; }
 .brand-mark {
-  width: 1.8rem; height: 1.8rem; border-radius: 8px; display: grid; place-items: center; font-size: 1rem;
-  background: linear-gradient(150deg, var(--bisque), var(--lavender));
+  width: 1.75rem; height: 1.75rem; border-radius: 7px; display: grid; place-items: center;
+  background: var(--lavender); color: #fff;
 }
+[data-theme="dark"] .brand-mark { color: #111; }
 .tabs { display: flex; gap: 2px; padding: 2px; border-radius: 10px; background: var(--fill-2); }
 .tabs button {
   position: relative; border: 0; background: transparent; padding: .3rem 1.05rem; border-radius: 8px;

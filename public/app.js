@@ -863,7 +863,7 @@ const chime = () => sfx("timer");
 
 function notify(title, body) {
   if (!state.settings.notifications || !("Notification" in window) || Notification.permission !== "granted") return;
-  try { new Notification(title, { body, icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎓</text></svg>" }); } catch {}
+  try { new Notification(title, { body, icon: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%238676d9'/%3E%3Cpath d='M10 16.5l4 4 8-9' fill='none' stroke='white' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" }); } catch {}
 }
 
 function getNotified() { try { return JSON.parse(localStorage.getItem("ct-notified") || "{}"); } catch { return {}; } }
@@ -945,7 +945,7 @@ document.addEventListener("click", (e) => {
     case "cal-select": if (e.target.closest(".check, .link-btn")) return; cal.sel = el.dataset.key; return renderCalendar();
     case "enable-notifs": return enableNotifications();
     case "dismiss-notif-banner": state.settings.dismissedNotifBanner = true; save(); return render();
-    case "test-notif": notify("Test reminder 🎓", "This is what a heads-up looks like."); return;
+    case "test-notif": notify("Test reminder", "This is what a heads-up looks like."); return;
     case "pomo-mode": return setPomoMode(el.dataset.mode, false);
     case "pomo-start":
       if (pomo.running) stopPomo();
