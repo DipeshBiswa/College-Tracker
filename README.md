@@ -10,10 +10,10 @@ Styled like apple.com in bisque & lavender, with light and dark mode. Install it
 - **Exams**: a countdown to each exam, plus where it is and what's on it.
 - **Calendar**: a month view of everything that's due.
 - **Reminders**: turn on desktop notifications to get a heads-up before things are due (you choose 12 hours to 1 week ahead). The Today tab shows how many things are coming up soon.
-- **Study music**: calm sounds made right in the app (lo-fi keys, café jazz, rain, ocean waves, soft pad, brown noise). Mix them, and they work offline. You can also paste a YouTube or Spotify playlist link.
+- **Study music**: calm sounds made right in the app (lo-fi keys, rain, ocean waves, soft pad, brown noise) that work offline, plus Café jazz from YouTube (falls back to built-in jazz when offline). Mix them together. You can also paste a YouTube or Spotify playlist link.
 - **Focus timer**: a floating mini timer follows you around the app (pause, reset or hide it while it keeps running), and a loud bell rings when time's up.
 - **Tools**: focus timer, "what do I need on the final?" calculator, GPA calculator, notes, saved links, study tips and helpful sites.
-- **Sounds**: soft, creamy keyboard clicks when you add or finish things (can be turned off in Settings).
+- **Sounds**: a chunky button click-clack on every button (can be turned off in Settings).
 - **Your data is saved** automatically on your device. Close it, restart your computer, open it again, and everything is still there.
 
 ## Install it as an app

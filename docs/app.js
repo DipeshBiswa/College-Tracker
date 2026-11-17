@@ -235,8 +235,8 @@ function buttonPress(ctx, out, t) {
 function sfx(name) {
   const s = state.settings;
   if (s.sounds === false) return;
-  const keys = SOUNDS[name];
-  if (!keys) return;
+  if (!SOUNDS[name]) return;
+  const keys = name === "alert" ? SOUNDS.alert : SOUNDS.button;   // every button uses the chunky Start-button click
   try {
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
     if (audioCtx.state === "suspended") audioCtx.resume();
@@ -730,7 +730,7 @@ function renderCalendar() {
 
 const TRACKS = [
   { id: "lofi", name: "Lo-fi keys", sub: "Soft piano chords" },
-  { id: "jazz", name: "Café jazz", sub: "Soft swing trio" },
+  { id: "jazz", name: "Café jazz", sub: "Relaxing jazz · YouTube", youtube: "neV3EPgvZ3g" },
   { id: "rain", name: "Rain", sub: "Steady and gentle" },
   { id: "waves", name: "Ocean waves", sub: "Slow and rolling" },
   { id: "pad", name: "Soft pad", sub: "Warm ambient hum" },
@@ -1016,6 +1016,8 @@ const TRACK_BUILDERS = {
 };
 
 function toggleTrack(id) {
+  const track = TRACKS.find((t) => t.id === id);
+  if (track.youtube) return toggleYouTubeTrack(track);
   const ctx = musicCtx();
   if (music.playing[id]) {
     const stop = music.playing[id]; delete music.playing[id];
@@ -1041,11 +1043,84 @@ function stopAllMusic() {
 }
 
 function togglePauseMusic() {
-  if (!music.ctx) return;
-  music.paused = !music.paused;
-  music.paused ? music.ctx.suspend() : music.ctx.resume();
+  const hasSynth = Object.keys(music.playing).length > 0;
+  const nowPaused = hasSynth ? !music.paused : !music.ytPaused;
+  if (music.ctx && hasSynth) { music.paused = nowPaused; nowPaused ? music.ctx.suspend() : music.ctx.resume(); }
+  if (music.embed) { music.ytPaused = nowPaused; ytCommand(nowPaused ? "pauseVideo" : "playVideo"); }
   updateMusicUI();
 }
+
+/* ---- YouTube-backed tracks (Café jazz) ---- */
+// The video plays in the corner player. If it can't (offline, or the video blocks embedding),
+// the built-in jazz trio plays instead so there's always music.
+function toggleYouTubeTrack(track) {
+  sfx("click");
+  if (music.embed === track.id) { closeEmbed(); return updateMusicUI(); }
+  if (music.playing[track.id]) { music.playing[track.id](); delete music.playing[track.id]; return updateMusicUI(); }
+  if (!navigator.onLine) { toast("You're offline, so playing the built-in jazz"); return startBuiltIn(track.id); }
+  openYouTube(`https://www.youtube.com/embed/${track.youtube}?autoplay=1&enablejsapi=1&loop=1&playlist=${track.youtube}&origin=${encodeURIComponent(location.origin)}`, track.id, track.name);
+}
+
+function startBuiltIn(id) {
+  const ctx = musicCtx();
+  if (music.paused) { music.paused = false; ctx.resume(); }
+  const out = ctx.createGain(); out.connect(music.master);
+  const stop = TRACK_BUILDERS[id](ctx, out);
+  music.playing[id] = () => {
+    const t = ctx.currentTime; out.gain.setValueAtTime(1, t); out.gain.linearRampToValueAtTime(0, t + 1.2);
+    setTimeout(() => { try { stop(); } catch {} out.disconnect(); }, 1300);
+  };
+  updateMusicUI();
+}
+
+function openYouTube(src, key, label) {
+  closeEmbed();
+  const box = $("#musicEmbed");
+  box.innerHTML = `<iframe id="ytFrame" src="${esc(src)}" title="${esc(label)}" width="100%" height="180" frameborder="0"
+    allow="autoplay; encrypted-media; picture-in-picture" referrerpolicy="strict-origin-when-cross-origin"></iframe>`;
+  box.hidden = false;
+  music.embed = key;
+  music.embedLabel = label;
+  music.ytPaused = false;
+  music.ytAlive = false;
+  const frame = $("#ytFrame");
+  frame.addEventListener("load", () => {
+    ytSend("listening");
+    setTimeout(() => ytCommand("setVolume", [state.settings.musicVolume ?? 50]), 800);
+  });
+  // If the player never responds (blocked network, YouTube down), fall back to the built-in version.
+  setTimeout(() => {
+    if (music.embed === key && $("#ytFrame") === frame && !music.ytAlive) {
+      closeEmbed();
+      if (TRACK_BUILDERS[key]) { toast("Couldn't reach YouTube, so playing the built-in jazz instead"); startBuiltIn(key); }
+      else { toast("Couldn't load that playlist"); updateMusicUI(); }
+    }
+  }, 10000);
+  updateMusicUI();
+}
+
+function ytSend(event) {
+  const f = $("#ytFrame");
+  if (f && f.contentWindow) f.contentWindow.postMessage(JSON.stringify({ event, id: 1, channel: "widget" }), "*");
+}
+function ytCommand(func, args = []) {
+  const f = $("#ytFrame");
+  if (f && f.contentWindow) f.contentWindow.postMessage(JSON.stringify({ event: "command", func, args }), "*");
+}
+
+// Listen for YouTube player errors (e.g. 101/150 = embedding not allowed) and fall back.
+window.addEventListener("message", (e) => {
+  let host = ""; try { host = new URL(e.origin).hostname; } catch { return; }
+  if (!/(^|\.)youtube(-nocookie)?\.com$/.test(host)) return;
+  let data; try { data = typeof e.data === "string" ? JSON.parse(e.data) : e.data; } catch { return; }
+  if (data && data.event && data.event !== "onError") music.ytAlive = true;   // the player is up and talking
+  if (data && data.event === "onError" && music.embed) {
+    const key = music.embed;
+    closeEmbed();
+    if (TRACK_BUILDERS[key]) { toast("That video can't play here, so playing the built-in jazz instead"); startBuiltIn(key); }
+    else { toast("That video can't be played here"); updateMusicUI(); }
+  }
+});
 
 // Your own playlist: YouTube or Spotify link -> embedded player
 function embedUrl(link) {
@@ -1072,32 +1147,36 @@ function openEmbed() {
   const link = state.settings.musicUrl || "";
   const src = embedUrl(link);
   if (!src) { toast("Paste a YouTube or Spotify link first"); return; }
-  const spotify = src.includes("spotify");
-  $("#musicEmbed").innerHTML = `<iframe src="${esc(src)}" title="Your playlist" width="100%" height="${spotify ? 152 : 180}" frameborder="0"
-    allow="autoplay; clipboard-write; encrypted-media; picture-in-picture" loading="lazy"></iframe>`;
-  $("#musicEmbed").hidden = false;
-  music.embed = true;
-  updateMusicUI();
+  if (src.includes("spotify")) {
+    closeEmbed();
+    $("#musicEmbed").innerHTML = `<iframe src="${esc(src)}" title="Your playlist" width="100%" height="152" frameborder="0"
+      allow="autoplay; clipboard-write; encrypted-media; picture-in-picture" loading="lazy"></iframe>`;
+    $("#musicEmbed").hidden = false;
+    music.embed = "playlist"; music.embedLabel = "Your playlist";
+    return updateMusicUI();
+  }
+  openYouTube(src + "&enablejsapi=1&origin=" + encodeURIComponent(location.origin), "playlist", "Your playlist");
 }
-function closeEmbed() { $("#musicEmbed").innerHTML = ""; $("#musicEmbed").hidden = true; music.embed = false; }
+function closeEmbed() { $("#musicEmbed").innerHTML = ""; $("#musicEmbed").hidden = true; music.embed = false; music.embedLabel = ""; music.ytPaused = false; }
 
 function musicStatus() {
   const names = Object.keys(music.playing).map((id) => TRACKS.find((t) => t.id === id).name);
-  if (music.embed) names.push("Your playlist");
-  return names.length ? `${music.paused ? "Paused" : "Playing"}: ${names.join(" + ")}` : "";
+  if (music.embed) names.push(music.embedLabel);
+  const paused = music.paused || (music.ytPaused && !Object.keys(music.playing).length);
+  return names.length ? `${paused ? "Paused" : "Playing"}: ${names.join(" + ")}` : "";
 }
 function updateMusicUI() {
-  const hm = $("#hubMusic"); if (hm) hm.textContent = musicStatus() || "Lo-fi, rain, waves and more";
+  const hm = $("#hubMusic"); if (hm) hm.textContent = musicStatus() || "Lo-fi, jazz, rain and more";
   const ids = Object.keys(music.playing);
   const names = ids.map((id) => TRACKS.find((t) => t.id === id).name);
-  if (music.embed) names.push("Your playlist");
+  if (music.embed) names.push(music.embedLabel);
   const dock = $("#musicDock");
   dock.hidden = !names.length;
   $("#musicNow").textContent = names.join(" + ");
-  $("#musicPause").textContent = music.paused ? "Play" : "Pause";
-  $("#musicPause").hidden = !ids.length;
-  $$(".track").forEach((el) => el.classList.toggle("on", !!music.playing[el.dataset.track]));
-  const eb = $("#embedBtn"); if (eb) eb.textContent = music.embed ? "Close player" : "Play";
+  const paused = ids.length ? music.paused : music.ytPaused;
+  $("#musicPause").textContent = paused ? "Play" : "Pause";
+  $$(".track").forEach((el) => el.classList.toggle("on", !!music.playing[el.dataset.track] || music.embed === el.dataset.track));
+  const eb = $("#embedBtn"); if (eb) eb.textContent = music.embed === "playlist" ? "Close player" : "Play";
 }
 
 $("#musicPause").addEventListener("click", togglePauseMusic);
@@ -1205,9 +1284,9 @@ const TOOL_PAGES = {
     <div class="card">
       <div class="row" style="flex-wrap:nowrap">
         <input type="url" id="musicUrl" value="${esc(state.settings.musicUrl || "")}" placeholder="Paste a YouTube or Spotify link"/>
-        <button class="btn primary" id="embedBtn" data-action="embed" style="flex:none">${music.embed ? "Close player" : "Play"}</button>
+        <button class="btn primary" id="embedBtn" data-action="embed" style="flex:none">${music.embed === "playlist" ? "Close player" : "Play"}</button>
       </div>
-      <div class="small muted" style="margin-top:.5rem">Playlists need an internet connection.</div>
+      <div class="small muted" style="margin-top:.5rem">Playlists and Café jazz need an internet connection.</div>
     </div>
     <p class="small muted center">Tap a sound to start it; you can mix a few. Music keeps playing while you use the rest of the app.</p>`;
   },
@@ -1627,7 +1706,7 @@ document.addEventListener("click", (e) => {
     case "open-tool": return openTool(el.dataset.tool);
     case "tools-back": toolsUi.open = null; sfx("click"); return renderTools();
     case "track": return toggleTrack(el.dataset.track);
-    case "embed": return music.embed ? (closeEmbed(), updateMusicUI()) : openEmbed();
+    case "embed": return music.embed === "playlist" ? (closeEmbed(), updateMusicUI()) : openEmbed();
     case "install-app": return installApp();
     case "toggle-sounds": state.settings.sounds = state.settings.sounds === false; save(); renderTools(); return sfx("complete");
     case "preview-sound": { const names = ["complete", "add", "alert", "timer", "allDone"]; return sfx(names[Math.floor(Math.random() * names.length)]); }
@@ -1641,7 +1720,7 @@ document.addEventListener("input", (e) => {
   if (t.id === "gpaPrior") { state.gpa.priorGpa = t.value; save(); return calcGpa(); }
   if (t.id === "gpaPriorCr") { state.gpa.priorCredits = t.value; save(); return calcGpa(); }
   if (t.id === "quickNotes") { state.notes = t.value; return save(); }
-  if (t.id === "musicVolume") { state.settings.musicVolume = Number(t.value); if (music.master) music.master.gain.setTargetAtTime(musicVol(), music.ctx.currentTime, 0.05); return save(); }
+  if (t.id === "musicVolume") { state.settings.musicVolume = Number(t.value); if (music.master) music.master.gain.setTargetAtTime(musicVol(), music.ctx.currentTime, 0.05); ytCommand("setVolume", [Number(t.value)]); return save(); }
   if (t.id === "musicUrl") { state.settings.musicUrl = t.value.trim(); return save(); }
 });
 
