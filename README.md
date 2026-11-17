@@ -1,7 +1,7 @@
 # 🎓 College Tracker
 
 A calm, local-first tracker for college: classes → assignments, exams, deadline reminders, and handy student tools.
-Apple-inspired design (frosted toolbar, segmented tabs, Reminders-style lists, iOS switches) in bisque & lavender, with **light and dark mode**. Runs on your own computer, no account, no internet needed.
+A calm, simple, Apple-inspired design in bisque & lavender, with **light and dark mode**.
 
 ## Features
 
@@ -36,7 +36,7 @@ It opens **http://localhost:5173** in your browser. Or double-click `start.sh` (
   `TRACKER_DATA_DIR="$HOME/Dropbox/college-tracker" npm start`
 
 ### Keyboard shortcuts
-`n` new assignment · `e` new exam · `1`–`5` switch tabs
+`n` new assignment · `e` new exam · `1`–`4` switch tabs, `5` tools
 
 ## Privacy
 

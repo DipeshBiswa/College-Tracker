@@ -190,7 +190,7 @@ function applyTheme() {
   const pref = state.settings.theme || "auto";
   const dark = pref === "dark" || (pref === "auto" && matchMedia("(prefers-color-scheme: dark)").matches);
   document.documentElement.dataset.theme = dark ? "dark" : "light";
-  $("#themeBtn").textContent = dark ? "☀️" : "🌙";
+  $("#themeBtn").textContent = dark ? "☀︎" : "☾";
   $("#themeBtn").title = dark ? "Switch to light mode" : "Switch to dark mode";
   try { localStorage.setItem("ct-theme", pref); } catch {}
 }
@@ -210,19 +210,24 @@ let currentTab = "dashboard";
 function showTab(tab) {
   currentTab = tab;
   $$("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
+  $("#toolsBtn").classList.toggle("active", tab === "tools");
   $$(".view").forEach((v) => v.classList.toggle("active", v.id === "view-" + tab));
   render();
   try { history.replaceState(null, "", "#" + tab); } catch {}
 }
+$("#toolsBtn").addEventListener("click", () => { sfx("click"); showTab("tools"); });
 $("#tabs").addEventListener("click", (e) => { const b = e.target.closest("button[data-tab]"); if (b) { sfx("click"); showTab(b.dataset.tab); } });
 
 /* ================= Form dialog ================= */
 
-function openForm({ title, fields, submitLabel = "Save", onSubmit }) {
+function openForm({ title, fields, submitLabel = "Save", onSubmit, onDelete }) {
   const dlg = $("#formDialog");
   $("#dialogTitle").textContent = title;
   $("#dialogSubmit").textContent = submitLabel;
   $("#dialogFields").innerHTML = fields.map(fieldHtml).join("");
+  const del = $("#dialogDelete");
+  del.hidden = !onDelete;
+  del.onclick = () => { if (onDelete() !== false) dlg.close(); };
   // color swatches
   $$(".swatch", dlg).forEach((sw) =>
     sw.addEventListener("click", () => {
@@ -235,7 +240,8 @@ function openForm({ title, fields, submitLabel = "Save", onSubmit }) {
   form.onsubmit = (e) => {
     e.preventDefault();
     const values = {};
-    const flat = fields.flatMap((f) => (f.type === "row" ? f.fields : [f]));
+    const flatten = (list) => list.flatMap((f) => (f.type === "row" || f.type === "more" ? flatten(f.fields) : [f]));
+    const flat = flatten(fields);
     for (const f of flat) {
       if (f.type === "days") values[f.name] = $$(`input[name="${f.name}"]:checked`, dlg).map((i) => Number(i.value));
       else if (f.type === "checkbox") values[f.name] = $(`[name="${f.name}"]`, dlg).checked;
@@ -267,6 +273,8 @@ function fieldHtml(f) {
       return `<label class="field row" style="justify-content:flex-start;gap:.5rem"><input type="checkbox" class="check" name="${f.name}" ${f.value ? "checked" : ""} style="flex:none"/><span style="margin:0">${esc(f.label)}</span></label>`;
     case "row":
       return `<div class="row">${f.fields.map(fieldHtml).join("")}</div>`;
+    case "more":
+      return `<details class="more" ${f.open ? "open" : ""}><summary>${esc(f.label || "More options")}</summary>${f.fields.map(fieldHtml).join("")}</details>`;
     default:
       input = `<input type="${f.type || "text"}" name="${f.name}" value="${val}" placeholder="${esc(f.placeholder || "")}" ${req} ${f.step ? `step="${f.step}"` : ""} ${f.min != null ? `min="${f.min}"` : ""} ${f.max != null ? `max="${f.max}"` : ""}/>`;
   }
@@ -283,37 +291,40 @@ function classOptions(includeNone = true) {
 function editClass(id) {
   const c = classById(id) || {};
   openForm({
-    title: id ? "Edit class" : "Add a class",
+    title: id ? "Edit class" : "New class",
     fields: [
       { name: "name", label: "Class name", value: c.name, required: true, placeholder: "Intro to Psychology" },
-      { type: "row", fields: [
-        { name: "code", label: "Course code", value: c.code, placeholder: "PSY 101" },
-        { name: "credits", label: "Credits", type: "number", value: c.credits, min: 0, step: "0.5", placeholder: "3" },
-      ] },
-      { type: "row", fields: [
-        { name: "instructor", label: "Instructor", value: c.instructor, placeholder: "Dr. Rivera" },
-        { name: "location", label: "Room", value: c.location, placeholder: "Hall B 204" },
-      ] },
+      { name: "code", label: "Course code (optional)", value: c.code, placeholder: "PSY 101" },
       { name: "days", label: "Meets on", type: "days", value: c.days || [] },
       { type: "row", fields: [
-        { name: "start", label: "Start time", type: "time", value: c.start },
-        { name: "end", label: "End time", type: "time", value: c.end },
+        { name: "start", label: "From", type: "time", value: c.start },
+        { name: "end", label: "To", type: "time", value: c.end },
       ] },
-      { name: "officeHours", label: "Office hours / contact", value: c.officeHours, placeholder: "Tue 2–3pm · rivera@school.edu" },
       { name: "color", label: "Color", type: "color", value: c.color || COLORS[state.classes.length % COLORS.length] },
+      { type: "more", fields: [
+        { type: "row", fields: [
+          { name: "instructor", label: "Instructor", value: c.instructor, placeholder: "Dr. Rivera" },
+          { name: "location", label: "Room", value: c.location, placeholder: "Hall B 204" },
+        ] },
+        { type: "row", fields: [
+          { name: "credits", label: "Credits", type: "number", value: c.credits, min: 0, step: "0.5", placeholder: "3" },
+          { name: "officeHours", label: "Office hours", value: c.officeHours, placeholder: "Tue 2–3pm" },
+        ] },
+      ] },
     ],
     onSubmit: (v) => {
       if (id) Object.assign(c, v);
       else state.classes.push({ id: uid(), ...v, createdAt: Date.now() });
-      save(); render(); sfx(id ? "click" : "add"); toast(id ? "Class updated" : "Class added ✓");
+      save(); render(); sfx(id ? "click" : "add"); toast(id ? "Saved" : "Class added");
     },
+    onDelete: id ? () => deleteClass(id) : null,
   });
 }
 
 function deleteClass(id) {
   const c = classById(id);
   const n = state.assignments.filter((a) => a.classId === id).length;
-  if (!confirm(`Delete "${c.name}"${n ? ` and its ${n} assignment${n > 1 ? "s" : ""}` : ""}? Exams for this class will be kept.`)) return;
+  if (!confirm(`Delete "${c.name}"${n ? ` and its ${n} assignment${n > 1 ? "s" : ""}` : ""}?`)) return false;
   state.classes = state.classes.filter((x) => x.id !== id);
   state.assignments = state.assignments.filter((a) => a.classId !== id);
   state.exams.forEach((e) => { if (e.classId === id) e.classId = ""; });
@@ -326,28 +337,29 @@ function defaultDue() {
   return toLocalInput(d);
 }
 
-function editAssignment(id, classId) {
+function editAssignment(id, classId, due) {
   const a = state.assignments.find((x) => x.id === id) || {};
   if (!state.classes.length && !id) { toast("Add a class first"); return editClass(); }
   openForm({
-    title: id ? "Edit assignment" : "Add assignment",
+    title: id ? "Edit assignment" : "New assignment",
     fields: [
-      { name: "title", label: "Assignment", value: a.title, required: true, placeholder: "Lab report #3" },
-      { name: "classId", label: "Class", type: "select", options: classOptions(false), value: a.classId || classId || state.classes[0]?.id },
+      { name: "title", label: "What's due?", value: a.title, required: true, placeholder: "Lab report #3" },
       { type: "row", fields: [
-        { name: "due", label: "Due", type: "datetime-local", value: a.due || defaultDue(), required: true },
-        { name: "priority", label: "Priority", type: "select", value: a.priority || "medium", options: [
-          { value: "low", label: "Low" }, { value: "medium", label: "Medium" }, { value: "high", label: "High" }] },
+        { name: "classId", label: "Class", type: "select", options: classOptions(false), value: a.classId || classId || state.classes[0]?.id },
+        { name: "due", label: "Due", type: "datetime-local", value: a.due || due || defaultDue(), required: true },
       ] },
-      { name: "type", label: "Type", type: "select", value: a.type || "Homework", options:
-        ["Homework", "Essay", "Project", "Lab", "Reading", "Quiz", "Discussion post", "Presentation", "Other"].map((x) => ({ value: x, label: x })) },
-      { name: "notes", label: "Notes / link", type: "textarea", value: a.notes, placeholder: "Pages 40–62, submit on Canvas…" },
+      { type: "more", open: !!(a.notes || a.priority === "high"), fields: [
+        { name: "priority", label: "Priority", type: "select", value: a.priority || "normal", options: [
+          { value: "normal", label: "Normal" }, { value: "high", label: "Important" }] },
+        { name: "notes", label: "Notes or link", type: "textarea", value: a.notes, placeholder: "Pages 40–62, submit on Canvas…" },
+      ] },
     ],
     onSubmit: (v) => {
       if (id) Object.assign(a, v);
       else state.assignments.push({ id: uid(), ...v, done: false, createdAt: Date.now() });
-      save(); render(); sfx(id ? "click" : "add"); toast(id ? "Assignment updated" : "Assignment added ✓");
+      save(); render(); sfx(id ? "click" : "add"); toast(id ? "Saved" : "Added");
     },
+    onDelete: id ? () => deleteAssignment(id) : null,
   });
 }
 
@@ -356,17 +368,19 @@ function toggleAssignment(id) {
   if (!a) return;
   a.done = !a.done;
   a.doneAt = a.done ? Date.now() : null;
-  save(); render();
+  save();
   if (a.done) {
     const rest = state.assignments.filter((x) => x.classId === a.classId && !x.done);
-    if (!rest.length) { sfx("allDone"); toast(`Everything in ${className(a.classId)} is done! 🎉`); }
+    if (!rest.length) { sfx("allDone"); toast(`All done in ${className(a.classId)}`); }
     else { sfx("complete"); toast(cheer()); }
   } else sfx("uncheck");
+  // let the checkmark animate before the row moves
+  setTimeout(render, a.done ? 450 : 0);
 }
 
 function deleteAssignment(id) {
   const a = state.assignments.find((x) => x.id === id);
-  if (!confirm(`Delete "${a.title}"?`)) return;
+  if (!confirm(`Delete "${a.title}"?`)) return false;
   state.assignments = state.assignments.filter((x) => x.id !== id);
   save(); render(); sfx("delete");
 }
@@ -375,61 +389,63 @@ function editExam(id) {
   const e = state.exams.find((x) => x.id === id) || {};
   const d = new Date(Date.now() + 7 * DAY); d.setHours(10, 0, 0, 0);
   openForm({
-    title: id ? "Edit exam" : "Add exam",
+    title: id ? "Edit exam" : "New exam",
     fields: [
       { name: "title", label: "Exam", value: e.title, required: true, placeholder: "Midterm 1" },
-      { name: "classId", label: "Class", type: "select", options: classOptions(true), value: e.classId },
       { type: "row", fields: [
-        { name: "date", label: "Date & time", type: "datetime-local", value: e.date || toLocalInput(d), required: true },
-        { name: "location", label: "Location", value: e.location, placeholder: "Room 110" },
+        { name: "classId", label: "Class", type: "select", options: classOptions(true), value: e.classId },
+        { name: "date", label: "When", type: "datetime-local", value: e.date || toLocalInput(d), required: true },
       ] },
-      { name: "topics", label: "Topics / chapters", type: "textarea", value: e.topics, placeholder: "Ch. 1–5, lecture slides weeks 1–6" },
-      { type: "row", fields: [
-        { name: "weight", label: "Worth (% of grade)", type: "number", value: e.weight, min: 0, max: 100, placeholder: "25" },
-        { name: "score", label: "Score (after)", type: "number", value: e.score, min: 0, step: "0.1", placeholder: "—" },
+      { type: "more", open: !!(e.topics || e.location), fields: [
+        { name: "location", label: "Where", value: e.location, placeholder: "Room 110" },
+        { name: "topics", label: "What's on it", type: "textarea", value: e.topics, placeholder: "Chapters 1–5" },
+        { name: "score", label: "Score (after the exam)", type: "number", value: e.score, min: 0, step: "0.1", placeholder: "—" },
       ] },
-      { name: "ready", label: "I feel ready for this one", type: "checkbox", value: e.ready },
     ],
     onSubmit: (v) => {
       if (id) Object.assign(e, v);
       else state.exams.push({ id: uid(), ...v, createdAt: Date.now() });
-      save(); render(); sfx(id ? "click" : "add"); toast(id ? "Exam updated" : "Exam added ✓");
+      save(); render(); sfx(id ? "click" : "add"); toast(id ? "Saved" : "Exam added");
     },
+    onDelete: id ? () => deleteExam(id) : null,
   });
 }
 
 function deleteExam(id) {
   const e = state.exams.find((x) => x.id === id);
-  if (!confirm(`Delete "${e.title}"?`)) return;
+  if (!confirm(`Delete "${e.title}"?`)) return false;
   state.exams = state.exams.filter((x) => x.id !== id);
   save(); render(); sfx("delete");
 }
 
-const CHEERS = ["Nice work! ✨", "One less thing 🎉", "Done and dusted ✓", "Keep that streak going 💜", "Look at you go 🌟", "Crushed it ✓"];
+const CHEERS = ["Nice work", "One less thing", "Done", "Well done", "Lovely"];
 const cheer = () => CHEERS[Math.floor(Math.random() * CHEERS.length)];
 
 /* ================= Rendering: shared pieces ================= */
 
+// "Today, 3:00 PM" · "Tomorrow, 11:59 PM" · "Friday, 9:00 AM" · "Nov 26"
+function friendlyDue(s) {
+  const d = parse(s);
+  if (!d) return "";
+  const days = Math.round((startOfDay(d) - startOfDay(new Date())) / DAY);
+  const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  if (d < Date.now()) return days === 0 ? `Overdue · ${time}` : days === -1 ? "Overdue · yesterday" : `Overdue · ${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+  if (days === 0) return `Today, ${time}`;
+  if (days === 1) return `Tomorrow, ${time}`;
+  if (days < 7) return `${d.toLocaleDateString(undefined, { weekday: "long" })}, ${time}`;
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 function assignmentRow(a, { showClass = true } = {}) {
   const u = urgency(a.due, a.done);
-  const chip = u === "overdue" ? `<span class="chip overdue">${esc(relative(a.due))}</span>`
-    : u === "soon" ? `<span class="chip soon">${esc(relative(a.due))}</span>`
-    : u === "done" ? `<span class="chip low">done</span>` : `<span>${esc(relative(a.due))}</span>`;
   return `<li class="item ${a.done ? "done" : ""}">
-    <input type="checkbox" class="check" style="--c:${esc(classColor(a.classId))}" data-action="toggle" data-id="${a.id}" ${a.done ? "checked" : ""} title="Mark done"/>
-    <div class="body">
-      <div class="title">${esc(a.title)}</div>
-      <div class="meta">
-        ${showClass ? `<span class="dot" style="background:${esc(classColor(a.classId))}"></span><span>${esc(className(a.classId))}</span>·` : ""}
-        <span>${esc(fmtDate(a.due))}</span>·${chip}
-        ${a.priority && a.priority !== "medium" ? `<span class="chip ${a.priority}">${a.priority}</span>` : ""}
-        ${a.type ? `<span class="chip">${esc(a.type)}</span>` : ""}
+    <input type="checkbox" class="check" style="--c:${esc(classColor(a.classId))}" data-action="toggle" data-id="${a.id}" ${a.done ? "checked" : ""} aria-label="Mark done"/>
+    <div class="body" data-action="edit-assignment" data-id="${a.id}">
+      <div class="title">${a.priority === "high" && !a.done ? '<span class="imp">!</span>' : ""}${esc(a.title)}</div>
+      <div class="meta ${u}">
+        ${showClass ? `<span class="dot" style="background:${esc(classColor(a.classId))}"></span><span>${esc(className(a.classId))}</span><span class="sep">·</span>` : ""}
+        <span class="when">${esc(friendlyDue(a.due))}</span>
       </div>
-      ${a.notes ? `<div class="meta">${linkify(a.notes)}</div>` : ""}
-    </div>
-    <div class="actions">
-      <button class="link-btn" data-action="edit-assignment" data-id="${a.id}" title="Edit">✎</button>
-      <button class="link-btn" data-action="delete-assignment" data-id="${a.id}" title="Delete">✕</button>
     </div>
   </li>`;
 }
@@ -438,17 +454,24 @@ function linkify(text) {
   return esc(text).replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>').replace(/\n/g, "<br>");
 }
 
+function daysUntil(s) { return Math.round((startOfDay(parse(s)) - startOfDay(new Date())) / DAY); }
+function countdownLabel(s) {
+  const d = daysUntil(s);
+  return d <= 0 ? "Today" : d === 1 ? "Tomorrow" : `${d} days`;
+}
+
 function examRow(e) {
-  const d = parse(e.date);
-  const days = Math.round((startOfDay(d) - startOfDay(new Date())) / DAY);
-  const past = d < Date.now();
-  return `<li class="item">
-    <span class="chip exam" style="margin-top:.15rem">EXAM</span>
-    <div class="body">
+  const past = parse(e.date) < Date.now() - 3 * 3600000;
+  const d = daysUntil(e.date);
+  return `<li class="item exam-item">
+    <span class="exam-mark" style="--c:${esc(classColor(e.classId))}"></span>
+    <div class="body" data-action="edit-exam" data-id="${e.id}">
       <div class="title">${esc(e.title)}</div>
-      <div class="meta"><span class="dot" style="background:${esc(classColor(e.classId))}"></span>${esc(className(e.classId))} · ${esc(fmtDate(e.date))}
-        · <span class="chip ${past ? "" : days <= 3 ? "overdue" : days <= 7 ? "soon" : ""}">${past ? "past" : days === 0 ? "today" : days === 1 ? "tomorrow" : `in ${days} days`}</span></div>
+      <div class="meta"><span class="dot" style="background:${esc(classColor(e.classId))}"></span><span>${esc(className(e.classId))}</span><span class="sep">·</span>
+        <span>${esc(parse(e.date).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }))}</span>
+        ${e.location ? `<span class="sep">·</span><span>${esc(e.location)}</span>` : ""}</div>
     </div>
+    <span class="pill ${past ? "" : d <= 2 ? "near" : ""}">${past ? (e.score !== "" && e.score != null ? esc(e.score) : "Done") : countdownLabel(e.date)}</span>
   </li>`;
 }
 
@@ -465,89 +488,61 @@ function alertItems() {
   return upcomingItems().filter((i) => parse(i.when) <= limit);
 }
 
-/* ================= Dashboard ================= */
+const itemRow = (i) => (i.kind === "a" ? assignmentRow(i.ref) : examRow(i.ref));
+const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+
+/* ================= Today ================= */
 
 function renderDashboard() {
   const now = new Date();
   const hr = now.getHours();
-  const greet = hr < 5 ? "Up late" : hr < 12 ? "Good morning" : hr < 17 ? "Good afternoon" : "Good evening";
-  const pending = state.assignments.filter((a) => !a.done);
-  const overdue = pending.filter((a) => parse(a.due) < now);
-  const week = pending.filter((a) => { const d = parse(a.due); return d >= now && d - now < 7 * DAY; });
-  const examsSoon = state.exams.filter((e) => { const d = parse(e.date); return d >= now && d - now < 14 * DAY; });
-  const weekAgo = Date.now() - 7 * DAY;
-  const doneWeek = state.assignments.filter((a) => a.done && a.doneAt > weekAgo);
+  const greet = hr < 5 ? "Good night" : hr < 12 ? "Good morning" : hr < 17 ? "Good afternoon" : "Good evening";
+  const weekEnd = Date.now() + 7 * DAY;
+  const items = upcomingItems();
+  const soon = items.filter((i) => parse(i.when) <= weekEnd);
+  const later = items.filter((i) => parse(i.when) > weekEnd);
+  const overdue = soon.filter((i) => i.kind === "a" && parse(i.when) < now).length;
+  const dueWeek = soon.filter((i) => i.kind === "a").length - overdue;
+  const nextExam = items.find((i) => i.kind === "e");
 
-  // Group upcoming
-  const groups = { Overdue: [], Today: [], Tomorrow: [], "This week": [], Later: [] };
-  const today0 = startOfDay(now);
-  for (const a of pending.sort(byDue)) {
-    const d = parse(a.due);
-    const diff = Math.round((startOfDay(d) - today0) / DAY);
-    if (d < now) groups.Overdue.push(a);
-    else if (diff === 0) groups.Today.push(a);
-    else if (diff === 1) groups.Tomorrow.push(a);
-    else if (diff < 7) groups["This week"].push(a);
-    else if (diff < 21) groups.Later.push(a);
+  let summary;
+  if (!state.classes.length) summary = "Let's set things up. Start by adding your classes.";
+  else if (!soon.length) summary = "Nothing due this week. Enjoy the calm.";
+  else {
+    const parts = [];
+    if (dueWeek) parts.push(`<b>${plural(dueWeek, "thing")}</b> due this week`);
+    if (overdue) parts.push(`<b>${overdue}</b> overdue`);
+    summary = parts.length ? `You have ${parts.join(" and ")}.` : "";
+    if (nextExam && daysUntil(nextExam.when) <= 14) summary += ` ${esc(nextExam.ref.title)} is ${daysUntil(nextExam.when) <= 0 ? "today" : daysUntil(nextExam.when) === 1 ? "tomorrow" : "in " + daysUntil(nextExam.when) + " days"}.`;
   }
-  const groupHtml = Object.entries(groups).filter(([, v]) => v.length)
-    .map(([k, v]) => `<div class="group-label">${k} · ${v.length}</div><ul class="items">${v.map((a) => assignmentRow(a)).join("")}</ul>`).join("");
 
-  // Today's classes
   const todays = state.classes.filter((c) => (c.days || []).includes(now.getDay())).sort((a, b) => (a.start || "").localeCompare(b.start || ""));
   const nowT = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
 
-  const nextExams = state.exams.filter((e) => parse(e.date) >= now).sort(byDate).slice(0, 4);
-
-  const notifBanner = "Notification" in window && Notification.permission === "default" && !state.settings.dismissedNotifBanner
-    ? `<div class="banner"><span>🔔</span><div class="grow"><b>Turn on desktop reminders?</b> <span class="muted">Get a pop-up when something is due within ${state.settings.alertHours} hours — even if this tab is in the background.</span></div>
-        <button class="btn primary small" data-action="enable-notifs">Turn on</button><button class="btn ghost small" data-action="dismiss-notif-banner">Not now</button></div>` : "";
-
   $("#view-dashboard").innerHTML = `
-    <div class="page-head">
-      <div><h1>${greet} 👋</h1><div class="muted">${now.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}${quoteOfDay()}</div></div>
-      <div class="row" style="flex:none">
-        <button class="btn" data-action="add-exam">+ Exam</button>
-        <button class="btn primary" data-action="add-assignment">+ Assignment</button>
+    <div class="hero">
+      <div class="eyebrow">${now.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</div>
+      <h1>${greet}</h1>
+      <p class="summary">${summary}</p>
+      <div class="hero-actions">
+        ${state.classes.length
+          ? `<button class="btn primary" data-action="add-assignment">Add assignment</button><button class="btn ghost" data-action="add-exam">Add exam</button>`
+          : `<button class="btn primary" data-action="add-class">Add a class</button>`}
       </div>
     </div>
-    ${notifBanner}
-    <div class="stats">
-      <div class="card stat danger"><span class="ico">!</span><div class="num">${overdue.length}</div><div class="label">Overdue</div></div>
-      <div class="card stat warn"><span class="ico">◷</span><div class="num">${week.length}</div><div class="label">Next 7 days</div></div>
-      <div class="card stat lav"><span class="ico">✎</span><div class="num">${examsSoon.length}</div><div class="label">Exams in 2 weeks</div></div>
-      <div class="card stat ok"><span class="ico">✓</span><div class="num">${doneWeek.length}</div><div class="label">Done this week</div></div>
-    </div>
-    <div class="grid grid-2">
-      <div class="card">
-        <h2>Coming up</h2>
-        ${groupHtml || (state.classes.length
-          ? `<div class="empty"><div class="big">🌿</div>Nothing due in the next 3 weeks. Enjoy the calm.</div>`
-          : `<div class="empty"><div class="big">📚</div>Start by adding your classes.<br><br><button class="btn primary" data-action="add-class">+ Add your first class</button></div>`)}
-      </div>
-      <div class="grid" style="align-content:start">
-        <div class="card today-classes">
-          <h2>Today's classes</h2>
-          ${todays.length ? todays.map((c) => {
-            const live = c.start && c.end && nowT >= c.start && nowT <= c.end;
-            const past = c.end && nowT > c.end;
-            return `<div class="tc" style="${past ? "opacity:.5" : ""}"><span class="time">${c.start ? fmtTime(c.start) : "—"}${c.end ? "–" + fmtTime(c.end) : ""}</span>
-              <span class="dot" style="background:${esc(c.color)}"></span><div><b>${esc(c.name)}</b>${live ? ' <span class="chip soon">now</span>' : ""}<div class="small muted">${esc([c.location, c.instructor].filter(Boolean).join(" · "))}</div></div></div>`;
-          }).join("") : `<div class="muted">No classes scheduled today${state.classes.length ? "" : " — add meeting days to your classes to see them here"}.</div>`}
-        </div>
-        <div class="card">
-          <h2>Next exams</h2>
-          ${nextExams.length ? `<ul class="items">${nextExams.map(examRow).join("")}</ul>` : `<div class="muted">No upcoming exams. <a href="#" data-action="add-exam">Add one</a></div>`}
-        </div>
-      </div>
-    </div>`;
-}
 
-const QUOTES = [
-  "Small steps every day.", "Done is better than perfect.", "You don't have to see the whole staircase, just the first step.",
-  "Rest is part of the work.", "Future you says thanks.", "Progress, not perfection.", "One assignment at a time.",
-];
-const quoteOfDay = () => ` · <i>${QUOTES[new Date().getDate() % QUOTES.length]}</i>`;
+    ${soon.length ? `<div class="section-title">This week</div><div class="card list-card"><ul class="items">${soon.map(itemRow).join("")}</ul></div>` : ""}
+
+    ${later.length ? `<details class="later"><summary>Later <span class="count">${later.length}</span></summary><div class="card list-card"><ul class="items">${later.map(itemRow).join("")}</ul></div></details>` : ""}
+
+    ${todays.length ? `<div class="section-title">Classes today</div><div class="card list-card"><ul class="items">${todays.map((c) => {
+      const past = c.end && nowT > c.end;
+      const live = c.start && c.end && nowT >= c.start && !past;
+      return `<li class="item ${past ? "faded" : ""}"><span class="dot big" style="background:${esc(c.color)}"></span>
+        <div class="body"><div class="title">${esc(c.name)}${live ? ' <span class="now">now</span>' : ""}</div>
+        <div class="meta">${esc([c.start ? fmtTime(c.start) + (c.end ? " – " + fmtTime(c.end) : "") : "", c.location].filter(Boolean).join(" · "))}</div></div></li>`;
+    }).join("")}</ul></div>` : ""}`;
+}
 
 /* ================= Classes ================= */
 
@@ -559,37 +554,29 @@ function renderClasses() {
     const done = list.filter((a) => a.done).length;
     const pct = list.length ? Math.round((done / list.length) * 100) : 0;
     const showDone = classUi.showDone[c.id];
-    const visible = showDone ? list : list.filter((a) => !a.done);
-    const sched = (c.days || []).length ? `${c.days.map((d) => DOW[d]).join("/")} ${c.start ? fmtTime(c.start) : ""}${c.end ? "–" + fmtTime(c.end) : ""}` : "";
-    const exams = state.exams.filter((e) => e.classId === c.id && parse(e.date) >= Date.now()).sort(byDate);
+    const pending = list.filter((a) => !a.done);
+    const doneList = list.filter((a) => a.done).reverse();
+    const sched = (c.days || []).length ? `${c.days.map((d) => DOW[d]).join(", ")}${c.start ? " · " + fmtTime(c.start) : ""}` : "";
     return `<div class="card class-card" style="--c:${esc(c.color)}">
-      <div class="class-head">
-        <div class="class-title"><span class="list-icon">${esc(initials(c))}</span>
-          <div style="min-width:0"><h2>${esc(c.name)}</h2>
-          <div class="class-sub">${esc([c.code, c.credits ? c.credits + " cr" : "", c.instructor, c.location, sched].filter(Boolean).join(" · "))}</div>
-          ${c.officeHours ? `<div class="class-sub">Office hours: ${esc(c.officeHours)}</div>` : ""}
-        </div></div>
-        <div class="actions" style="display:flex">
-          <button class="link-btn" data-action="edit-class" data-id="${c.id}" title="Edit class">✎</button>
-          <button class="link-btn" data-action="delete-class" data-id="${c.id}" title="Delete class">✕</button>
-        </div>
+      <div class="class-head" data-action="edit-class" data-id="${c.id}" title="Edit class">
+        <span class="list-icon">${esc(initials(c))}</span>
+        <div class="grow"><h2>${esc(c.name)}</h2><div class="class-sub">${esc([c.code, sched].filter(Boolean).join(" · ")) || "&nbsp;"}</div></div>
+        ${done ? `<span class="ring-pct" style="--p:${pct}" title="${done} of ${list.length} done"></span>` : ""}
       </div>
-      <div class="progress"><div style="width:${pct}%"></div></div>
-      <div class="small muted" style="margin-bottom:.3rem">${done}/${list.length} assignments done${exams.length ? ` · next exam: <b>${esc(exams[0].title)}</b> ${esc(relative(exams[0].date))}` : ""}</div>
-      ${visible.length ? `<ul class="items">${visible.map((a) => assignmentRow(a, { showClass: false })).join("")}</ul>`
-        : `<div class="muted small" style="padding:.5rem 0">${list.length ? "All caught up 🎉" : "No assignments yet."}</div>`}
+      ${pending.length ? `<ul class="items">${pending.map((a) => assignmentRow(a, { showClass: false })).join("")}</ul>`
+        : list.length ? `<div class="calm-note">All caught up</div>` : ""}
+      ${showDone && doneList.length ? `<ul class="items">${doneList.map((a) => assignmentRow(a, { showClass: false })).join("")}</ul>` : ""}
       <div class="class-foot">
-        <button class="btn small primary" data-action="add-assignment" data-class="${c.id}">+ Add assignment</button>
-        ${done ? `<button class="link-btn small" data-action="toggle-done-view" data-id="${c.id}">${showDone ? "Hide" : "Show"} completed (${done})</button>` : ""}
+        <button class="text-btn" data-action="add-assignment" data-class="${c.id}">+ Add assignment</button>
+        ${done ? `<button class="text-btn muted" data-action="toggle-done-view" data-id="${c.id}">${showDone ? "Hide" : "Show"} completed</button>` : ""}
       </div>
     </div>`;
   }).join("");
 
   $("#view-classes").innerHTML = `
-    <div class="page-head"><div><h1>Classes</h1><div class="muted">Each class holds its own assignments.</div></div>
-      <button class="btn primary" data-action="add-class">+ Add class</button></div>
-    ${state.classes.length ? `<div class="grid grid-2">${cards}</div>`
-      : `<div class="card empty"><div class="big">📚</div>No classes yet. Add one to start tracking assignments.<br><br><button class="btn primary" data-action="add-class">+ Add class</button></div>`}`;
+    <div class="page-head"><h1>Classes</h1><button class="btn primary" data-action="add-class">Add class</button></div>
+    ${state.classes.length ? `<div class="stack">${cards}</div>`
+      : `<div class="card empty">No classes yet.<br><br><button class="btn primary" data-action="add-class">Add your first class</button></div>`}`;
 }
 
 function initials(c) {
@@ -601,46 +588,14 @@ function initials(c) {
 /* ================= Exams ================= */
 
 function renderExams() {
-  const now = Date.now();
-  const upcoming = state.exams.filter((e) => parse(e.date) >= now - 3 * 3600000).sort(byDate);
-  const past = state.exams.filter((e) => parse(e.date) < now - 3 * 3600000).sort(byDate).reverse();
-
-  const card = (e, isPast) => {
-    const d = parse(e.date);
-    const days = Math.round((startOfDay(d) - startOfDay(new Date())) / DAY);
-    const hrs = Math.max(0, Math.round((d - now) / 3600000));
-    const cls = isPast ? "" : days <= 2 ? "urgent" : days <= 7 ? "soon" : "";
-    const cd = isPast ? `<span class="n">${e.score !== "" && e.score != null ? esc(e.score) : "✓"}</span><span class="u">${e.score !== "" && e.score != null ? "score" : "done"}</span>`
-      : days === 0 ? `<span class="n">${hrs}</span><span class="u">hours</span>`
-      : `<span class="n">${days}</span><span class="u">day${days === 1 ? "" : "s"}</span>`;
-    return `<div class="card exam-card" style="${isPast ? "opacity:.75" : ""}">
-      <div class="countdown ${cls}">${cd}</div>
-      <div style="flex:1;min-width:0">
-        <div class="row" style="justify-content:space-between"><h3 style="margin:0">${esc(e.title)}</h3>
-          <div style="flex:none"><button class="link-btn" data-action="edit-exam" data-id="${e.id}" title="Edit">✎</button><button class="link-btn" data-action="delete-exam" data-id="${e.id}" title="Delete">✕</button></div></div>
-        <div class="meta small muted" style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center">
-          <span class="dot" style="background:${esc(classColor(e.classId))}"></span>${esc(className(e.classId))} · ${esc(fmtDate(e.date))}${e.location ? " · 📍 " + esc(e.location) : ""}${e.weight ? ` · ${esc(e.weight)}% of grade` : ""}
-          ${!isPast ? (e.ready ? '<span class="chip low">ready ✓</span>' : '<span class="chip">still prepping</span>') : ""}
-        </div>
-        ${e.topics ? `<div class="small" style="margin-top:.35rem">${linkify(e.topics)}</div>` : ""}
-        ${!isPast && days > 0 && days <= 14 ? `<div class="small muted" style="margin-top:.35rem">💡 ${studyPlanHint(days)}</div>` : ""}
-      </div>
-    </div>`;
-  };
-
+  const cutoff = Date.now() - 3 * 3600000;
+  const upcoming = state.exams.filter((e) => parse(e.date) >= cutoff).sort(byDate);
+  const past = state.exams.filter((e) => parse(e.date) < cutoff).sort(byDate).reverse();
   $("#view-exams").innerHTML = `
-    <div class="page-head"><div><h1>Exams</h1><div class="muted">Countdowns, topics and a gentle study nudge.</div></div>
-      <button class="btn primary" data-action="add-exam">+ Add exam</button></div>
-    ${upcoming.length ? `<div class="grid grid-2">${upcoming.map((e) => card(e, false)).join("")}</div>`
-      : `<div class="card empty"><div class="big">📝</div>No upcoming exams.<br><br><button class="btn primary" data-action="add-exam">+ Add exam</button></div>`}
-    ${past.length ? `<h2 style="margin-top:2rem">Past exams</h2><div class="grid grid-2">${past.map((e) => card(e, true)).join("")}</div>` : ""}`;
-}
-
-function studyPlanHint(days) {
-  if (days <= 1) return "Light review tonight, then sleep — rest beats cramming.";
-  if (days <= 3) return "Do practice problems / a mock test, and review what you missed.";
-  if (days <= 7) return `Spread review over ${days} days: ~1 topic a day with active recall.`;
-  return "Start a spaced-repetition deck now and revisit it every few days.";
+    <div class="page-head"><h1>Exams</h1><button class="btn primary" data-action="add-exam">Add exam</button></div>
+    ${upcoming.length ? `<div class="card list-card"><ul class="items">${upcoming.map(examRow).join("")}</ul></div>`
+      : `<div class="card empty">No upcoming exams.</div>`}
+    ${past.length ? `<details class="later"><summary>Past exams <span class="count">${past.length}</span></summary><div class="card list-card"><ul class="items">${past.map(examRow).join("")}</ul></div></details>` : ""}`;
 }
 
 /* ================= Calendar ================= */
@@ -654,7 +609,7 @@ function renderCalendar() {
   const events = {};
   const push = (k, ev) => (events[k] = events[k] || []).push(ev);
   state.assignments.forEach((a) => a.due && push(a.due.slice(0, 10), { t: a.title, c: classColor(a.classId), done: a.done, kind: "a", ref: a }));
-  state.exams.forEach((e) => e.date && push(e.date.slice(0, 10), { t: "📝 " + e.title, c: classColor(e.classId), kind: "e", ref: e }));
+  state.exams.forEach((e) => e.date && push(e.date.slice(0, 10), { t: e.title, c: classColor(e.classId), kind: "e", ref: e }));
 
   let cells = DOW.map((d) => `<div class="cal-dow">${d}</div>`).join("");
   for (let i = 0; i < 42; i++) {
@@ -677,15 +632,15 @@ function renderCalendar() {
     <div class="card">
       <div class="cal-head">
         <h2>${first.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</h2>
-        <button class="btn small" data-action="cal-prev">‹</button>
-        <button class="btn small" data-action="cal-today">Today</button>
-        <button class="btn small" data-action="cal-next">›</button>
+        <button class="link-btn" data-action="cal-prev" aria-label="Previous month">‹</button>
+        <button class="text-btn" data-action="cal-today">Today</button>
+        <button class="link-btn" data-action="cal-next" aria-label="Next month">›</button>
       </div>
       <div class="cal-grid">${cells}</div>
     </div>
     <div class="card" style="margin-top:1rem">
       <div class="row" style="justify-content:space-between"><h2 style="margin:0">${selDate.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</h2>
-        <button class="btn small primary" data-action="add-assignment-on" data-key="${cal.sel}" style="flex:none">+ Assignment this day</button></div>
+        <button class="text-btn" data-action="add-assignment-on" data-key="${cal.sel}" style="flex:none">+ Add</button></div>
       ${selClasses.length ? `<div class="small muted" style="margin:.5rem 0">Classes: ${selClasses.map((c) => `<span class="dot" style="background:${esc(c.color)}"></span> ${esc(c.code || c.name)} ${c.start ? fmtTime(c.start) : ""}`).join(" · ")}</div>` : ""}
       ${selEv.length ? `<ul class="items" style="margin-top:.5rem">${selEv.map((e) => (e.kind === "a" ? assignmentRow(e.ref) : examRow(e.ref))).join("")}</ul>`
         : `<div class="muted" style="margin-top:.5rem">Nothing due this day.</div>`}
@@ -702,124 +657,120 @@ function renderTools() {
   const s = state.settings;
   const p = state.pomodoro;
   if (pomo.left == null) pomo.left = p[pomo.mode] * 60;
-  const todayK = dateKey(new Date());
-  const todayCount = p.history[todayK] || 0;
-  const weekMins = Object.entries(p.history).filter(([k]) => new Date(k + "T00:00") > Date.now() - 7 * DAY).reduce((n, [, v]) => n + v, 0) * p.focus;
+  const todayCount = p.history[dateKey(new Date())] || 0;
 
   const gpaRows = state.gpa.courses.map((c, i) => `<tr>
     <td><input type="text" data-gpa="${i}" data-f="name" value="${esc(c.name)}" placeholder="Course"/></td>
-    <td style="width:5.5rem"><input type="number" data-gpa="${i}" data-f="credits" value="${esc(c.credits)}" min="0" step="0.5" placeholder="Cr"/></td>
-    <td style="width:5.5rem"><select data-gpa="${i}" data-f="grade">${Object.keys(GRADE_POINTS).map((g) => `<option ${g === c.grade ? "selected" : ""}>${g}</option>`).join("")}</select></td>
-    <td><button class="link-btn" data-action="gpa-remove" data-i="${i}">✕</button></td></tr>`).join("");
+    <td style="width:4.8rem"><input type="number" data-gpa="${i}" data-f="credits" value="${esc(c.credits)}" min="0" step="0.5" placeholder="Cr"/></td>
+    <td style="width:5rem"><select data-gpa="${i}" data-f="grade">${Object.keys(GRADE_POINTS).map((g) => `<option ${g === c.grade ? "selected" : ""}>${g}</option>`).join("")}</select></td>
+    <td><button class="link-btn" data-action="gpa-remove" data-i="${i}" aria-label="Remove">✕</button></td></tr>`).join("");
+
+  const notifOn = "Notification" in window && Notification.permission === "granted" && s.notifications;
 
   $("#view-tools").innerHTML = `
-    <div class="page-head"><div><h1>Student Tools</h1><div class="muted">Little things that make college easier.</div></div></div>
-    <div class="grid grid-3">
+    <div class="page-head"><h1>Tools</h1></div>
+    <div class="grid grid-2">
 
       <div class="card timer">
         <h2>Focus timer</h2>
         <div class="mode-pills">
-          ${["focus", "short", "long"].map((m) => `<button data-action="pomo-mode" data-mode="${m}" class="${pomo.mode === m ? "active" : ""}">${{ focus: "Focus", short: "Short break", long: "Long break" }[m]}</button>`).join("")}
+          ${["focus", "short", "long"].map((m) => `<button data-action="pomo-mode" data-mode="${m}" class="${pomo.mode === m ? "active" : ""}">${{ focus: "Focus", short: "Break", long: "Long break" }[m]}</button>`).join("")}
         </div>
         <div class="ring">
-          <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="45" fill="none" stroke="var(--surface-2)" stroke-width="6"/>
-            <circle id="pomoRing" cx="50" cy="50" r="45" fill="none" stroke="var(--lavender)" stroke-width="6" stroke-linecap="round" stroke-dasharray="282.7" stroke-dashoffset="0"/></svg>
+          <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="46" fill="none" stroke="var(--fill-2)" stroke-width="3"/>
+            <circle id="pomoRing" cx="50" cy="50" r="46" fill="none" stroke="var(--lavender)" stroke-width="3" stroke-linecap="round" stroke-dasharray="289" stroke-dashoffset="0"/></svg>
           <div class="time" id="pomoTime">00:00</div>
         </div>
-        <div class="row" style="justify-content:center;margin-top:.6rem">
-          <button class="btn primary" data-action="pomo-start" style="flex:none" id="pomoStart">${pomo.running ? "Pause" : "Start"}</button>
-          <button class="btn" data-action="pomo-reset" style="flex:none">Reset</button>
+        <div class="row" style="justify-content:center;margin-top:.8rem">
+          <button class="btn primary" data-action="pomo-start" style="flex:none;min-width:6rem" id="pomoStart">${pomo.running ? "Pause" : "Start"}</button>
+          <button class="btn ghost" data-action="pomo-reset" style="flex:none">Reset</button>
         </div>
-        <div class="small muted" style="margin-top:.6rem">Today: <b>${todayCount}</b> session${todayCount === 1 ? "" : "s"} · Last 7 days: <b>${Math.round(weekMins / 60 * 10) / 10}</b> h focused</div>
-        <div class="row small" style="margin-top:.6rem">
-          <label>Focus <input type="number" data-pomo="focus" value="${p.focus}" min="1" max="120"/></label>
-          <label>Short <input type="number" data-pomo="short" value="${p.short}" min="1" max="60"/></label>
-          <label>Long <input type="number" data-pomo="long" value="${p.long}" min="1" max="60"/></label>
-        </div>
+        <div class="small muted" style="margin-top:.7rem">${todayCount ? `${plural(todayCount, "session")} today` : "Short focused sessions with breaks in between."}</div>
+        <details class="mini"><summary>Adjust times</summary>
+          <div class="row small" style="margin-top:.5rem">
+            <label>Focus <input type="number" data-pomo="focus" value="${p.focus}" min="1" max="120"/></label>
+            <label>Break <input type="number" data-pomo="short" value="${p.short}" min="1" max="60"/></label>
+            <label>Long <input type="number" data-pomo="long" value="${p.long}" min="1" max="60"/></label>
+          </div>
+        </details>
       </div>
 
       <div class="card">
         <h2>What do I need on the final?</h2>
-        <label class="field"><span>Current grade in class (%)</span><input type="number" id="fgCurrent" value="${esc(fg.cur)}" placeholder="84" step="0.1"/></label>
-        <label class="field"><span>Final exam is worth (% of grade)</span><input type="number" id="fgWeight" value="${esc(fg.w)}" placeholder="30" step="0.1"/></label>
-        <label class="field"><span>Grade I want (%)</span><input type="number" id="fgTarget" value="${esc(fg.t)}" placeholder="90" step="0.1"/></label>
+        <label class="field"><span>Current grade (%)</span><input type="number" id="fgCurrent" value="${esc(fg.cur)}" placeholder="84" step="0.1"/></label>
+        <div class="row">
+          <label class="field"><span>Final is worth (%)</span><input type="number" id="fgWeight" value="${esc(fg.w)}" placeholder="30" step="0.1"/></label>
+          <label class="field"><span>Grade I want (%)</span><input type="number" id="fgTarget" value="${esc(fg.t)}" placeholder="90" step="0.1"/></label>
+        </div>
         <div id="fgResult"></div>
       </div>
 
       <div class="card">
-        <h2>GPA calculator</h2>
-        <table class="gpa">${gpaRows || `<tr><td class="muted small">Add this semester's courses.</td></tr>`}</table>
-        <div class="row" style="margin:.5rem 0">
-          <button class="btn small" data-action="gpa-add" style="flex:none">+ Course</button>
-          ${state.classes.length ? `<button class="btn small ghost" data-action="gpa-import" style="flex:none">Import my classes</button>` : ""}
+        <h2>GPA</h2>
+        ${gpaRows ? `<table class="gpa">${gpaRows}</table>` : `<p class="muted small" style="margin-top:0">Add your courses and grades to see your GPA.</p>`}
+        <div class="row" style="margin:.5rem 0 0">
+          <button class="text-btn" data-action="gpa-add" style="flex:none">+ Add course</button>
+          ${state.classes.length ? `<button class="text-btn muted" data-action="gpa-import" style="flex:none">Use my classes</button>` : ""}
         </div>
-        <div class="row small">
-          <label>Prior GPA <input type="number" id="gpaPrior" value="${esc(state.gpa.priorGpa)}" step="0.01" min="0" max="4" placeholder="optional"/></label>
-          <label>Prior credits <input type="number" id="gpaPriorCr" value="${esc(state.gpa.priorCredits)}" min="0" placeholder="optional"/></label>
-        </div>
+        <details class="mini"><summary>Include previous semesters</summary>
+          <div class="row small" style="margin-top:.5rem">
+            <label>Prior GPA <input type="number" id="gpaPrior" value="${esc(state.gpa.priorGpa)}" step="0.01" min="0" max="4"/></label>
+            <label>Prior credits <input type="number" id="gpaPriorCr" value="${esc(state.gpa.priorCredits)}" min="0"/></label>
+          </div>
+        </details>
         <div id="gpaResult"></div>
       </div>
 
       <div class="card">
-        <h2>Quick notes</h2>
-        <textarea id="quickNotes" style="min-height:200px" placeholder="Things to ask the professor, books to buy, ideas…">${esc(state.notes)}</textarea>
-        <div class="small muted">Saves automatically.</div>
+        <h2>Notes</h2>
+        <textarea id="quickNotes" class="plain" style="min-height:190px" placeholder="Anything on your mind…">${esc(state.notes)}</textarea>
       </div>
+    </div>
 
+    <details class="later">
+      <summary>Links & study resources</summary>
       <div class="card">
-        <h2>My links</h2>
-        <ul class="resource-list">${state.links.map((l, i) => `<li class="row" style="flex-wrap:nowrap"><a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.name)}</a><button class="link-btn" style="flex:none" data-action="link-remove" data-i="${i}">✕</button></li>`).join("") || `<li class="muted small">Save your school portal, Canvas/Blackboard, email, library…</li>`}</ul>
-        <button class="btn small" data-action="link-add" style="margin-top:.6rem">+ Add link</button>
-      </div>
+        <div class="section-title" style="margin-top:0">My links</div>
+        <ul class="resource-list">${state.links.map((l, i) => `<li class="row" style="flex-wrap:nowrap"><a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.name)}</a><button class="link-btn" style="flex:none" data-action="link-remove" data-i="${i}" aria-label="Remove">✕</button></li>`).join("")}</ul>
+        <button class="text-btn" data-action="link-add">+ Add link</button>
 
-      <div class="card">
-        <h2>Study tips that work</h2>
-        <ul class="tips small">
-          <li><b>Active recall:</b> close the notes and try to write/explain it from memory — then check.</li>
-          <li><b>Spaced repetition:</b> review after 1 day, 3 days, a week. Short and often beats one long session.</li>
-          <li><b>Feynman technique:</b> explain it simply, like to a friend. The gaps show you what to study.</li>
-          <li><b>Practice tests:</b> old exams and end-of-chapter problems are the best predictor of how you'll do.</li>
-          <li><b>Interleave:</b> mix problem types instead of doing 20 of the same in a row.</li>
-          <li><b>Sleep:</b> memory consolidates overnight — an all-nighter usually costs more than it gains.</li>
-          <li><b>Office hours:</b> go early in the semester, not the week before the exam.</li>
-          <li><b>Read the syllabus:</b> add every deadline and exam here in week one.</li>
-        </ul>
-      </div>
-
-      <div class="card">
-        <h2>Handy resources</h2>
+        <div class="section-title">Helpful sites</div>
         <ul class="resource-list small">
-          <li><a href="https://www.khanacademy.org" target="_blank" rel="noopener">Khan Academy</a> — free lessons for math, science, econ</li>
-          <li><a href="https://www.desmos.com/calculator" target="_blank" rel="noopener">Desmos</a> — graphing calculator</li>
-          <li><a href="https://www.wolframalpha.com" target="_blank" rel="noopener">Wolfram|Alpha</a> — check math & science work</li>
-          <li><a href="https://owl.purdue.edu" target="_blank" rel="noopener">Purdue OWL</a> — writing help, APA/MLA/Chicago citations</li>
-          <li><a href="https://www.zotero.org" target="_blank" rel="noopener">Zotero</a> — free citation & research manager</li>
-          <li><a href="https://apps.ankiweb.net" target="_blank" rel="noopener">Anki</a> — spaced-repetition flashcards</li>
-          <li><a href="https://scholar.google.com" target="_blank" rel="noopener">Google Scholar</a> — find papers & sources</li>
-          <li><a href="https://education.github.com/pack" target="_blank" rel="noopener">GitHub Student Pack</a> — free dev tools with a .edu</li>
-          <li><a href="https://openstax.org" target="_blank" rel="noopener">OpenStax</a> — free, peer-reviewed textbooks</li>
+          <li><a href="https://www.khanacademy.org" target="_blank" rel="noopener">Khan Academy</a> <span class="muted">· free lessons</span></li>
+          <li><a href="https://www.desmos.com/calculator" target="_blank" rel="noopener">Desmos</a> <span class="muted">· graphing calculator</span></li>
+          <li><a href="https://owl.purdue.edu" target="_blank" rel="noopener">Purdue OWL</a> <span class="muted">· writing & citations</span></li>
+          <li><a href="https://www.zotero.org" target="_blank" rel="noopener">Zotero</a> <span class="muted">· citation manager</span></li>
+          <li><a href="https://apps.ankiweb.net" target="_blank" rel="noopener">Anki</a> <span class="muted">· flashcards</span></li>
+          <li><a href="https://openstax.org" target="_blank" rel="noopener">OpenStax</a> <span class="muted">· free textbooks</span></li>
+          <li><a href="https://scholar.google.com" target="_blank" rel="noopener">Google Scholar</a> <span class="muted">· research papers</span></li>
         </ul>
-        <div class="small muted" style="margin-top:.6rem">Also check your school for free tutoring, a writing center, counseling, and student software deals.</div>
-      </div>
 
-      <div class="card">
-        <h2>Settings & backup</h2>
-        <label class="field"><span>Warn me about things due within</span>
-          <select id="setAlert">${[12, 24, 48, 72, 168].map((h) => `<option value="${h}" ${s.alertHours === h ? "selected" : ""}>${h < 168 ? h + " hours" : "1 week"}</option>`).join("")}</select></label>
-        <label class="field"><span>Theme</span>
-          <select id="setTheme">${[["auto", "Match my system"], ["light", "Light · bisque"], ["dark", "Dark · lavender night"]].map(([v, l]) => `<option value="${v}" ${s.theme === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
-        <div class="setting-row"><span class="lbl">Desktop reminders ${s.notifications ? `<button class="link-btn small" data-action="test-notif">Test</button>` : ""}</span>
-          <label class="switch"><input type="checkbox" id="setNotifs" ${"Notification" in window && Notification.permission === "granted" && s.notifications ? "checked" : ""}/><span></span></label></div>
-        <div class="setting-row"><span class="lbl">Sound effects <button class="link-btn small" data-action="preview-sound">Try</button></span>
-          <label class="switch"><input type="checkbox" id="setSounds" ${s.sounds === false ? "" : "checked"}/><span></span></label></div>
-        <div class="setting-row"><span class="muted small" style="flex:none">🔈</span><input type="range" id="setVolume" min="0" max="100" value="${s.volume ?? 60}" ${s.sounds === false ? "disabled" : ""}/><span class="muted small" style="flex:none">🔊</span></div>
-        <div class="row">
-          <button class="btn small" data-action="export" style="flex:none">⬇ Export backup</button>
-          <label class="btn small" style="flex:none">⬆ Import<input type="file" id="importFile" accept=".json,application/json" hidden/></label>
-        </div>
-        <div class="small muted" style="margin-top:.6rem">${serverOnline ? "✓ Saving to <code>data/tracker.json</code> on your computer." : "⚠ Server offline — saving in this browser only. Run <code>npm start</code>."}</div>
+        <div class="section-title">Study tips</div>
+        <ul class="tips small">
+          <li>Test yourself instead of rereading — recall is what makes it stick.</li>
+          <li>Review in short sessions spread over days, not one long cram.</li>
+          <li>Explain it simply, as if to a friend. The gaps show what to study.</li>
+          <li>Sleep before an exam beats an all-nighter.</li>
+          <li>Go to office hours early in the semester.</li>
+        </ul>
       </div>
-    </div>`;
+    </details>
+
+    <div class="section-title">Settings</div>
+    <div class="card settings">
+      <div class="setting-row"><span class="lbl">Appearance</span>
+        <select id="setTheme" class="compact">${[["auto", "Automatic"], ["light", "Light"], ["dark", "Dark"]].map(([v, l]) => `<option value="${v}" ${s.theme === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+      <div class="setting-row"><span class="lbl">Remind me</span>
+        <select id="setAlert" class="compact">${[[12, "12 hours before"], [24, "1 day before"], [48, "2 days before"], [72, "3 days before"], [168, "1 week before"]].map(([h, l]) => `<option value="${h}" ${s.alertHours === h ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+      <div class="setting-row"><span class="lbl">Desktop notifications</span>
+        <label class="switch"><input type="checkbox" id="setNotifs" ${notifOn ? "checked" : ""}/><span></span></label></div>
+      <div class="setting-row"><span class="lbl">Sounds</span>
+        <label class="switch"><input type="checkbox" id="setSounds" ${s.sounds === false ? "" : "checked"}/><span></span></label></div>
+      ${s.sounds === false ? "" : `<div class="setting-row"><span class="lbl muted">Volume</span><input type="range" id="setVolume" min="0" max="100" value="${s.volume ?? 60}" style="max-width:180px"/></div>`}
+      <div class="setting-row"><span class="lbl">Backup</span>
+        <span class="row" style="flex:none;gap:.4rem"><button class="text-btn" data-action="export">Export</button><label class="text-btn">Import<input type="file" id="importFile" accept=".json,application/json" hidden/></label></span></div>
+    </div>
+    <p class="small muted center">${serverOnline ? "Your data is saved on this computer." : "The app's server isn't running, so data is only saved in this browser. Run <code>npm start</code>."}</p>`;
 
   updatePomoDisplay();
   calcFinal();
@@ -835,8 +786,8 @@ function calcFinal() {
   if ([cur, w, t].some(isNaN) || w <= 0 || w > 100) { out.innerHTML = ""; return; }
   const need = (t - cur * (1 - w / 100)) / (w / 100);
   const r = Math.round(need * 10) / 10;
-  out.innerHTML = need > 100 ? `<div class="result bad">You'd need ${r}% — above 100%. Talk to your professor about extra credit, or aim for a slightly lower target.</div>`
-    : need <= 0 ? `<div class="result good">You've already locked in ${t}% — even a 0 keeps it. (Still show up 😉)</div>`
+  out.innerHTML = need > 100 ? `<div class="result bad">You'd need ${r}%, which is above 100%. A slightly lower goal might be kinder.</div>`
+    : need <= 0 ? `<div class="result good">You've already secured ${t}%.</div>`
     : `<div class="result ${need <= 70 ? "good" : ""}">You need <b>${r}%</b> on the final.</div>`;
 }
 
@@ -869,7 +820,7 @@ function updatePomoDisplay() {
   el.textContent = label;
   const ring = $("#pomoRing");
   if (ring) {
-    ring.style.strokeDashoffset = String(282.7 * (1 - pomo.left / total));
+    ring.style.strokeDashoffset = String(289 * (1 - pomo.left / total));
     ring.style.stroke = pomo.mode === "focus" ? "var(--lavender)" : "var(--bisque)";
   }
   const btn = $("#pomoStart");
@@ -952,26 +903,7 @@ function checkAlerts() {
   if (fresh && !firstAlertCheck) sfx("alert");
   firstAlertCheck = false;
 
-  if (!$("#alertDrawer").hidden) renderDrawer();
 }
-
-function renderDrawer() {
-  const items = alertItems();
-  $("#alertDrawer").innerHTML = `<h3>Within the next ${state.settings.alertHours < 168 ? state.settings.alertHours + " hours" : "week"}</h3>
-    ${items.length ? `<ul class="items">${items.map((i) => (i.kind === "a" ? assignmentRow(i.ref) : examRow(i.ref))).join("")}</ul>`
-      : `<div class="muted">You're all clear. 🌿</div>`}`;
-}
-
-$("#bellBtn").addEventListener("click", (e) => {
-  e.stopPropagation();
-  const d = $("#alertDrawer");
-  d.hidden = !d.hidden;
-  if (!d.hidden) renderDrawer();
-});
-document.addEventListener("click", (e) => {
-  const d = $("#alertDrawer");
-  if (!d.hidden && !d.contains(e.target) && !e.target.closest("#bellBtn") && !e.target.closest("dialog")) d.hidden = true;
-});
 
 async function enableNotifications() {
   if (!("Notification" in window)) { toast("This browser doesn't support notifications"); return; }
@@ -998,10 +930,7 @@ document.addEventListener("click", (e) => {
     case "add-assignment": return editAssignment(null, el.dataset.class);
     case "add-assignment-on": {
       if (!state.classes.length) { toast("Add a class first"); return editClass(); }
-      editAssignment();
-      const input = $('#formDialog input[name="due"]');
-      if (input) input.value = `${el.dataset.key}T23:59`;
-      return;
+      return editAssignment(null, null, `${el.dataset.key}T23:59`);
     }
     case "edit-assignment": return editAssignment(id);
     case "delete-assignment": return deleteAssignment(id);
@@ -1058,7 +987,7 @@ document.addEventListener("change", (e) => {
     state.pomodoro[t.dataset.pomo] = v; save();
     if (!pomo.running && pomo.mode === t.dataset.pomo) { pomo.left = v * 60; updatePomoDisplay(); }
   }
-  if (t.id === "setSounds") { state.settings.sounds = t.checked; save(); if (t.checked) sfx("complete"); $("#setVolume").disabled = !t.checked; }
+  if (t.id === "setSounds") { state.settings.sounds = t.checked; save(); if (t.checked) sfx("complete"); renderTools(); }
   if (t.id === "setNotifs") { if (t.checked) enableNotifications(); else { state.settings.notifications = false; save(); renderTools(); } }
   if (t.id === "setVolume") { state.settings.volume = Number(t.value); save(); sfx("complete"); }
   if (t.id === "setAlert") { state.settings.alertHours = Number(t.value); save(); checkAlerts(); }

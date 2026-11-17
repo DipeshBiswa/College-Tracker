@@ -22,21 +22,16 @@
       <span class="brand-name">College Tracker</span>
     </div>
     <nav class="tabs" id="tabs">
-      <button data-tab="dashboard" class="active">Dashboard</button>
+      <button data-tab="dashboard" class="active">Today<span class="badge" id="bellCount" hidden>0</span></button>
       <button data-tab="classes">Classes</button>
       <button data-tab="exams">Exams</button>
       <button data-tab="calendar">Calendar</button>
-      <button data-tab="tools">Student Tools</button>
     </nav>
     <div class="top-actions">
-      <button class="icon-btn" id="bellBtn" title="What's coming up">
-        🔔<span class="badge" id="bellCount" hidden>0</span>
-      </button>
-      <button class="icon-btn" id="themeBtn" title="Toggle light / dark mode">🌙</button>
+      <button class="icon-btn wide" id="toolsBtn" title="Focus timer, GPA, notes & settings">Tools</button>
+      <button class="icon-btn" id="themeBtn" title="Toggle light / dark mode">☾</button>
     </div>
   </header>
-
-  <div class="alert-drawer" id="alertDrawer" hidden></div>
 
   <main>
     <section id="view-dashboard" class="view active"></section>
@@ -51,6 +46,8 @@
       <h2 id="dialogTitle"></h2>
       <div id="dialogFields"></div>
       <div class="dialog-actions">
+        <button type="button" class="text-btn danger" id="dialogDelete" hidden>Delete</button>
+        <span style="flex:1"></span>
         <button type="button" class="btn ghost" id="dialogCancel">Cancel</button>
         <button type="submit" class="btn primary" id="dialogSubmit">Save</button>
       </div>
