@@ -144,43 +144,76 @@ function toast(msg) {
   toastTimer = setTimeout(() => (t.hidden = true), 2600);
 }
 
-/* ================= Sound effects (synthesized, no files) ================= */
+/* ================= Sound effects: soft "creamy" keyboard keys (synthesized, no files) ================= */
 
-// Each sound is a list of soft notes: [frequency Hz, start s, length s, waveform, loudness]
+// Each sound is a little sequence of keystrokes: [delay s, pitch Hz of the "thock", brightness of the click, loudness]
 const SOUNDS = {
-  complete: [[659.25, 0, 0.18, "sine", 1], [987.77, 0.09, 0.35, "sine", 0.9], [1318.5, 0.18, 0.5, "triangle", 0.35]],
-  uncheck:  [[523.25, 0, 0.14, "sine", 0.7], [392.0, 0.07, 0.22, "sine", 0.6]],
-  add:      [[587.33, 0, 0.12, "triangle", 0.8], [880.0, 0.06, 0.25, "sine", 0.7]],
-  delete:   [[311.13, 0, 0.16, "sine", 0.8], [207.65, 0.08, 0.3, "sine", 0.7]],
-  click:    [[1046.5, 0, 0.05, "sine", 0.35]],
-  open:     [[783.99, 0, 0.1, "sine", 0.45], [1046.5, 0.05, 0.14, "sine", 0.35]],
-  theme:    [[440, 0, 0.25, "sine", 0.5], [554.37, 0.08, 0.3, "sine", 0.45], [659.25, 0.16, 0.4, "sine", 0.4]],
-  alert:    [[880, 0, 0.6, "sine", 0.8], [1318.5, 0, 0.6, "sine", 0.25], [880, 0.35, 0.8, "sine", 0.6], [1318.5, 0.35, 0.8, "sine", 0.2]],
-  timer:    [[523.25, 0, 0.6, "sine", 0.9], [659.25, 0.18, 0.6, "sine", 0.9], [783.99, 0.36, 0.7, "sine", 0.9], [1046.5, 0.54, 1.1, "triangle", 0.5]],
-  allDone:  [[523.25, 0, 0.2, "triangle", 0.8], [659.25, 0.1, 0.2, "triangle", 0.8], [783.99, 0.2, 0.2, "triangle", 0.8], [1046.5, 0.3, 0.7, "sine", 0.9], [1318.5, 0.42, 0.8, "sine", 0.4]],
+  click:    [[0, 190, 0.9, 0.7]],
+  open:     [[0, 200, 1.0, 0.6]],
+  add:      [[0, 185, 1.0, 0.8], [0.075, 205, 1.05, 0.7]],
+  complete: [[0, 175, 0.95, 0.9], [0.085, 215, 1.1, 0.75]],
+  uncheck:  [[0, 160, 0.8, 0.7]],
+  delete:   [[0, 120, 0.6, 0.9]],                                    // deeper, like a spacebar
+  theme:    [[0, 170, 0.9, 0.7], [0.11, 190, 0.95, 0.6]],
+  alert:    [[0, 200, 1.1, 0.9], [0.13, 200, 1.1, 0.8], [0.26, 230, 1.2, 0.85]],
+  timer:    [[0, 125, 0.7, 1], [0.22, 125, 0.7, 0.9]],
+  allDone:  [[0, 175, 1, 0.8], [0.06, 190, 1.05, 0.75], [0.12, 205, 1.1, 0.75], [0.18, 225, 1.15, 0.85]],
 };
 
-let audioCtx = null;
+let audioCtx = null, noiseBuf = null;
+
+function keystroke(ctx, out, t, pitch, bright, loud) {
+  const vary = 1 + (Math.random() - 0.5) * 0.08;           // tiny variation, like real keys
+  // 1) The soft click: a short burst of filtered noise.
+  const n = ctx.createBufferSource(); n.buffer = noiseBuf;
+  const bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = 2200 * bright * vary; bp.Q.value = 0.9;
+  const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 3800;  // keeps it muted, not clacky
+  const ng = ctx.createGain();
+  ng.gain.setValueAtTime(0.0001, t);
+  ng.gain.exponentialRampToValueAtTime(0.55 * loud, t + 0.0015);
+  ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.028);
+  n.connect(bp).connect(lp).connect(ng).connect(out);
+  n.start(t); n.stop(t + 0.04);
+  // 2) The creamy "thock": a low, quickly falling body tone.
+  const o = ctx.createOscillator(); o.type = "triangle";
+  o.frequency.setValueAtTime(pitch * vary, t);
+  o.frequency.exponentialRampToValueAtTime(pitch * 0.55 * vary, t + 0.05);
+  const body = ctx.createBiquadFilter(); body.type = "lowpass"; body.frequency.value = 900;
+  const og = ctx.createGain();
+  og.gain.setValueAtTime(0.0001, t);
+  og.gain.exponentialRampToValueAtTime(0.9 * loud, t + 0.003);
+  og.gain.exponentialRampToValueAtTime(0.0001, t + 0.075);
+  o.connect(body).connect(og).connect(out);
+  o.start(t); o.stop(t + 0.09);
+  // 3) A faint bottom-out a few ms later gives that soft, cushioned feel.
+  const n2 = ctx.createBufferSource(); n2.buffer = noiseBuf;
+  const lp2 = ctx.createBiquadFilter(); lp2.type = "lowpass"; lp2.frequency.value = 1200;
+  const g2 = ctx.createGain();
+  g2.gain.setValueAtTime(0.0001, t + 0.012);
+  g2.gain.exponentialRampToValueAtTime(0.25 * loud, t + 0.014);
+  g2.gain.exponentialRampToValueAtTime(0.0001, t + 0.04);
+  n2.connect(lp2).connect(g2).connect(out);
+  n2.start(t + 0.012); n2.stop(t + 0.05);
+}
+
 function sfx(name) {
   const s = state.settings;
   if (s.sounds === false) return;
-  const notes = SOUNDS[name];
-  if (!notes) return;
+  const keys = SOUNDS[name];
+  if (!keys) return;
   try {
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
     if (audioCtx.state === "suspended") audioCtx.resume();
-    const vol = (s.volume ?? 60) / 100 * 0.22;
-    const t0 = audioCtx.currentTime + 0.01;
-    for (const [f, start, len, type, loud] of notes) {
-      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-      o.type = type; o.frequency.value = f;
-      const at = t0 + start;
-      g.gain.setValueAtTime(0.0001, at);
-      g.gain.exponentialRampToValueAtTime(Math.max(0.0002, vol * loud), at + 0.012);
-      g.gain.exponentialRampToValueAtTime(0.0001, at + len);
-      o.connect(g).connect(audioCtx.destination);
-      o.start(at); o.stop(at + len + 0.05);
+    if (!noiseBuf) {
+      noiseBuf = audioCtx.createBuffer(1, Math.floor(audioCtx.sampleRate * 0.06), audioCtx.sampleRate);
+      const d = noiseBuf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
     }
+    const master = audioCtx.createGain();
+    master.gain.value = ((s.volume ?? 60) / 100) * 0.5;
+    master.connect(audioCtx.destination);
+    const t0 = audioCtx.currentTime + 0.005;
+    for (const [delay, pitch, bright, loud] of keys) keystroke(audioCtx, master, t0 + delay, pitch, bright, loud);
   } catch {}
 }
 

@@ -11,7 +11,7 @@ Styled like apple.com in bisque & lavender, with light and dark mode. Install it
 - **Calendar**: a month view of everything that's due.
 - **Reminders**: turn on desktop notifications to get a heads-up before things are due (you choose 12 hours to 1 week ahead). The Today tab shows how many things are coming up soon.
 - **Tools**: focus timer, "what do I need on the final?" calculator, GPA calculator, notes, saved links, study tips and helpful sites.
-- **Sounds**: soft chimes when you add or finish things (can be turned off in Settings).
+- **Sounds**: soft, creamy keyboard clicks when you add or finish things (can be turned off in Settings).
 - **Your data is saved** automatically on your device. Close it, restart your computer, open it again, and everything is still there.
 
 ## Install it as an app
