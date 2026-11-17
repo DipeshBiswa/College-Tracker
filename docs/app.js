@@ -16,8 +16,11 @@ const DEFAULTS = {
 };
 
 let state = structuredClone(DEFAULTS);
-let serverOnline = true;
+// "device": saved inside the installed app on this computer (default).
+// "server": saved to data/tracker.json when started with `npm start`.
+let storageMode = "device";
 let saveTimer = null;
+const LOCAL_KEY = "ct-state";
 
 function merge(base, data) {
   const out = { ...base, ...(data || {}) };
@@ -27,48 +30,44 @@ function merge(base, data) {
   return out;
 }
 
+const readLocal = () => { try { return JSON.parse(localStorage.getItem(LOCAL_KEY) || "null"); } catch { return null; } };
+const isEmpty = (d) => !d || (!(d.classes || []).length && !(d.assignments || []).length && !(d.exams || []).length);
+
 async function load() {
   let data = null;
-  try {
-    const r = await fetch("/api/data", { cache: "no-store" });
-    if (!r.ok) throw new Error();
-    data = await r.json();
-  } catch {
-    serverOnline = false;
-    try { data = JSON.parse(localStorage.getItem("ct-state") || "null"); } catch {}
-  }
-  // If the server file is empty but the browser has a copy (e.g. server data deleted), recover it.
-  const local = (() => { try { return JSON.parse(localStorage.getItem("ct-state") || "null"); } catch { return null; } })();
-  const isEmpty = (d) => !d || (!(d.classes || []).length && !(d.assignments || []).length && !(d.exams || []).length);
-  if (serverOnline && isEmpty(data) && !isEmpty(local)) { data = local; save(); }
+  const local0 = ["localhost", "127.0.0.1"].includes(location.hostname);
+  if (local0) try {
+    const r = await fetch("api/data", { cache: "no-store" });
+    if (r.ok && (r.headers.get("content-type") || "").includes("application/json")) {
+      data = await r.json();
+      storageMode = "server";
+    }
+  } catch {}
+  const local = readLocal();
+  if (storageMode === "device") data = local;
+  else if (isEmpty(data) && !isEmpty(local)) { data = local; }
   state = merge(DEFAULTS, data);
+  if (storageMode === "server" && data === local && local) save();
+  // Ask the browser to never clear this app's data to free up space.
+  try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch {}
 }
 
 function save() {
-  try { localStorage.setItem("ct-state", JSON.stringify(state)); } catch {}
+  try { localStorage.setItem(LOCAL_KEY, JSON.stringify(state)); } catch {}
+  if (storageMode !== "server") return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
+    saveTimer = null;
     try {
-      const r = await fetch("/api/data", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(state),
-      });
-      if (!r.ok) throw new Error();
-      if (!serverOnline) toast("Reconnected — saved to disk ✓");
-      serverOnline = true;
-    } catch {
-      if (serverOnline) toast("Server not reachable — saved in this browser for now");
-      serverOnline = false;
-    }
+      await fetch("api/data", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state) });
+    } catch {}
   }, 250);
 }
 
-// Make sure a pending save goes out if the tab closes.
 window.addEventListener("beforeunload", () => {
-  if (saveTimer) {
+  if (storageMode === "server" && saveTimer) {
     clearTimeout(saveTimer);
-    try { fetch("/api/data", { method: "PUT", keepalive: true, headers: { "Content-Type": "application/json" }, body: JSON.stringify(state) }); } catch {}
+    try { fetch("api/data", { method: "PUT", keepalive: true, headers: { "Content-Type": "application/json" }, body: JSON.stringify(state) }); } catch {}
   }
 });
 
@@ -194,6 +193,8 @@ function applyTheme() {
   $("#themeBtn").textContent = dark ? "☀︎" : "☾";
   $("#themeBtn").title = dark ? "Switch to light mode" : "Switch to dark mode";
   try { localStorage.setItem("ct-theme", pref); } catch {}
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = dark ? "#161617" : "#f8f3ec";
 }
 $("#themeBtn").addEventListener("click", () => {
   const dark = document.documentElement.dataset.theme === "dark";
@@ -768,10 +769,11 @@ function renderTools() {
       <div class="setting-row"><span class="lbl">Sounds</span>
         <label class="switch"><input type="checkbox" id="setSounds" ${s.sounds === false ? "" : "checked"}/><span></span></label></div>
       ${s.sounds === false ? "" : `<div class="setting-row"><span class="lbl muted">Volume</span><input type="range" id="setVolume" min="0" max="100" value="${s.volume ?? 60}" style="max-width:180px"/></div>`}
+      ${isInstalled() ? "" : `<div class="setting-row"><span class="lbl">Install as an app</span><button class="text-btn" data-action="install-app">${installPrompt ? "Install" : "How?"}</button></div>`}
       <div class="setting-row"><span class="lbl">Backup</span>
         <span class="row" style="flex:none;gap:.4rem"><button class="text-btn" data-action="export">Export</button><label class="text-btn">Import<input type="file" id="importFile" accept=".json,application/json" hidden/></label></span></div>
     </div>
-    <p class="small muted center">${serverOnline ? "Your data is saved on this computer." : "The app's server isn't running, so data is only saved in this browser. Run <code>npm start</code>."}</p>`;
+    <p class="small muted center">${storageMode === "server" ? "Saving to data/tracker.json on this computer." : "Your data is saved on this device. Export a backup now and then to keep a copy."}</p>`;
 
   updatePomoDisplay();
   calcFinal();
@@ -967,6 +969,7 @@ document.addEventListener("click", (e) => {
       });
     case "link-remove": state.links.splice(Number(el.dataset.i), 1); save(); return renderTools();
     case "export": return exportData();
+    case "install-app": return installApp();
     case "toggle-sounds": state.settings.sounds = state.settings.sounds === false; save(); renderTools(); return sfx("complete");
     case "preview-sound": { const names = ["complete", "add", "alert", "timer", "allDone"]; return sfx(names[Math.floor(Math.random() * names.length)]); }
   }
@@ -1028,6 +1031,43 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "e") { e.preventDefault(); editExam(); }
 });
 
+/* ================= Install as an app ================= */
+
+let installPrompt = null;
+const isInstalled = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  installPrompt = e;
+  if (!isInstalled()) $("#installBtn").hidden = false;
+  if (currentTab === "tools") renderTools();
+});
+window.addEventListener("appinstalled", () => {
+  installPrompt = null;
+  $("#installBtn").hidden = true;
+  toast("Installed. Open College Tracker from your apps");
+});
+async function installApp() {
+  if (installPrompt) {
+    installPrompt.prompt();
+    const { outcome } = await installPrompt.userChoice;
+    if (outcome === "accepted") { installPrompt = null; $("#installBtn").hidden = true; }
+    return;
+  }
+  toast(installHint());
+}
+function installHint() {
+  const ua = navigator.userAgent;
+  if (/iPhone|iPad/.test(ua)) return "Tap Share, then 'Add to Home Screen'";
+  if (/Safari/.test(ua) && !/Chrome|Chromium|Edg/.test(ua)) return "In Safari: File menu, then 'Add to Dock'";
+  return "Use the install icon in your browser's address bar";
+}
+$("#installBtn").addEventListener("click", installApp);
+
+if ("serviceWorker" in navigator && location.protocol !== "file:") {
+  window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+}
+
 /* ================= Main ================= */
 
 function render() {
@@ -1045,5 +1085,4 @@ function render() {
   setInterval(checkAlerts, 60000);
   // Refresh relative times every minute (skip while typing in tools).
   setInterval(() => { if (currentTab !== "tools" && !$("#formDialog").open) render(); }, 60000);
-  if (!serverOnline) toast("Server not running — data is saved in this browser only");
 })();
