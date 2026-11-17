@@ -16,8 +16,9 @@
   <script>
     // Apply saved theme before paint to avoid a flash.
     try {
+      // Light is the default. Dark only if chosen (or "Match system" is chosen and the system is dark).
       const t = localStorage.getItem("ct-theme");
-      const dark = t === "dark" || (t !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+      const dark = t === "dark" || (t === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
       document.documentElement.dataset.theme = dark ? "dark" : "light";
     } catch (e) {}
   </script>

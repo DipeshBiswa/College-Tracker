@@ -11,7 +11,7 @@ const DEFAULTS = {
   gpa: { courses: [], priorGpa: "", priorCredits: "" },
   notes: "",
   links: [],
-  settings: { alertHours: 48, notifications: false, theme: "auto", sounds: true, volume: 60 },
+  settings: { alertHours: 48, notifications: false, theme: "light", sounds: true, volume: 60 },
   pomodoro: { focus: 25, short: 5, long: 15, history: {} },
 };
 
@@ -27,6 +27,7 @@ function merge(base, data) {
   for (const k of ["gpa", "settings", "pomodoro"]) out[k] = { ...base[k], ...((data || {})[k] || {}) };
   for (const k of ["classes", "assignments", "exams", "links"]) if (!Array.isArray(out[k])) out[k] = [];
   if (!Array.isArray(out.gpa.courses)) out.gpa.courses = [];
+  if (out.settings.theme === "auto" || !out.settings.theme) out.settings.theme = "light";   // light is the default
   return out;
 }
 
@@ -256,8 +257,8 @@ function sfx(name) {
 /* ================= Theme ================= */
 
 function applyTheme() {
-  const pref = state.settings.theme || "auto";
-  const dark = pref === "dark" || (pref === "auto" && matchMedia("(prefers-color-scheme: dark)").matches);
+  const pref = state.settings.theme || "light";
+  const dark = pref === "dark" || (pref === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
   document.documentElement.dataset.theme = dark ? "dark" : "light";
   $("#themeBtn").textContent = dark ? "☀︎" : "☾";
   $("#themeBtn").title = dark ? "Switch to light mode" : "Switch to dark mode";
@@ -729,6 +730,7 @@ function renderCalendar() {
 
 const TRACKS = [
   { id: "lofi", name: "Lo-fi keys", sub: "Soft piano chords" },
+  { id: "jazz", name: "Café jazz", sub: "Soft swing trio" },
   { id: "rain", name: "Rain", sub: "Steady and gentle" },
   { id: "waves", name: "Ocean waves", sub: "Slow and rolling" },
   { id: "pad", name: "Soft pad", sub: "Warm ambient hum" },
@@ -854,6 +856,120 @@ const TRACK_BUILDERS = {
     play();
     const timer = setInterval(play, 14000);
     return () => { clearInterval(timer); voices.forEach(({ o }) => { try { o.stop(); } catch {} }); lfo.stop(); };
+  },
+
+  jazz(ctx, out) {
+    const bpm = 92, beat = 60 / bpm, swing = beat * 2 / 3;               // swung eighths
+    // 8-bar loop in B-flat: | Cm9 | F13 | Bbmaj9 | Gm9 | Cm9 | F7(b9) | Bbmaj9 | Bb6 |
+    const bars = [
+      { root: 36, chord: [51, 55, 58, 62] },      // Cm9   (Eb G Bb D)
+      { root: 41, chord: [51, 55, 57, 62] },      // F13   (Eb G A D)
+      { root: 34, chord: [50, 53, 57, 60] },      // Bbmaj9 (D F A C)
+      { root: 43, chord: [50, 53, 57, 58] },      // Gm9   (D F A Bb)
+      { root: 36, chord: [51, 55, 58, 62] },      // Cm9
+      { root: 41, chord: [51, 54, 57, 63] },      // F7b9  (Eb Gb A Eb)
+      { root: 34, chord: [50, 53, 57, 60] },      // Bbmaj9
+      { root: 34, chord: [50, 53, 55, 60] },      // Bb6/9 (D F G C)
+    ];
+    const scale = [70, 72, 74, 75, 77, 79, 81, 82];                      // B-flat major, upper register
+    const hz = (m) => 440 * 2 ** ((m - 69) / 12);
+    const bus = ctx.createGain(); fadeIn(ctx, bus, 0.72, 2); bus.connect(out);
+    const noise = noiseBuffer(ctx, "pink", 1);
+    const done = (nodes) => () => nodes.forEach((n) => { try { n.disconnect(); } catch {} });
+
+    // Upright bass: round, plucked, low
+    const bassTone = ctx.createBiquadFilter(); bassTone.type = "lowpass"; bassTone.frequency.value = 520; bassTone.connect(bus);
+    const bass = (m, t, vel = 0.5) => {
+      const o = ctx.createOscillator(); o.type = "triangle"; o.frequency.value = hz(m);
+      const o2 = ctx.createOscillator(); o2.type = "sine"; o2.frequency.value = hz(m);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vel, t + 0.012);
+      g.gain.exponentialRampToValueAtTime(vel * 0.4, t + 0.18); g.gain.exponentialRampToValueAtTime(0.0001, t + beat * 0.95);
+      o.connect(g); o2.connect(g); g.connect(bassTone);
+      o.start(t); o2.start(t); o.stop(t + beat); o2.stop(t + beat);
+      o.onended = done([o, o2, g]);
+    };
+    // Electric piano (Rhodes-like): warm sine with a soft bell on top
+    const epTone = ctx.createBiquadFilter(); epTone.type = "lowpass"; epTone.frequency.value = 2200; epTone.connect(bus);
+    const ep = (m, t, len, vel) => {
+      const g = ctx.createGain(); g.connect(epTone);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vel, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(vel * 0.3, t + 0.5); g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+      const parts = [[1, 1], [2, 0.12], [4.01, 0.06]].map(([mult, amp]) => {
+        const o = ctx.createOscillator(); o.type = "sine"; o.frequency.value = hz(m) * mult;
+        const a = ctx.createGain(); a.gain.value = amp;
+        if (mult > 2) { a.gain.setValueAtTime(amp, t); a.gain.exponentialRampToValueAtTime(0.0001, t + 0.25); }   // bell fades fast
+        o.connect(a).connect(g); o.start(t); o.stop(t + len + 0.05);
+        return [o, a];
+      });
+      parts[0][0].onended = done([...parts.flat(), g]);
+    };
+    // Ride cymbal: soft, shimmering noise ping
+    const ride = (t, vel) => {
+      const n = ctx.createBufferSource(); n.buffer = noise; n.playbackRate.value = 1.0 + Math.random() * 0.05;
+      const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 5500;
+      const bp = ctx.createBiquadFilter(); bp.type = "peaking"; bp.frequency.value = 8200; bp.gain.value = 6;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vel, t + 0.003);
+      g.gain.exponentialRampToValueAtTime(vel * 0.25, t + 0.12); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
+      n.connect(hp).connect(bp).connect(g).connect(bus); n.start(t); n.stop(t + 0.65);
+      n.onended = done([n, hp, bp, g]);
+    };
+    // Brushes on 2 and 4: a gentle swish
+    const brush = (t, vel) => {
+      const n = ctx.createBufferSource(); n.buffer = noise;
+      const bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = 2600; bp.Q.value = 0.7;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vel, t + 0.03);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+      n.connect(bp).connect(g).connect(bus); n.start(t); n.stop(t + 0.25);
+      n.onended = done([n, bp, g]);
+    };
+
+    // Walking bass line: root, chord tones, then a half-step approach into the next bar's root
+    const fit = (m) => { while (m < 31) m += 12; while (m > 50) m -= 12; return m; };   // keep in upright-bass range
+    const walk = (bar, next) => {
+      const r = bar.root;
+      const tones = bar.chord.map((m) => r + (((m - r) % 12) + 12) % 12);   // chord tones above the root
+      const second = fit(tones[Math.floor(Math.random() * tones.length)]);
+      const third = fit(Math.random() < 0.6 ? r + 7 : tones[Math.floor(Math.random() * tones.length)]);
+      let target = next.root; while (target - third > 6) target -= 12; while (third - target > 6) target += 12;
+      const approach = fit(target + (Math.random() < 0.5 ? 1 : -1));       // half-step lead-in to the next chord
+      return [fit(r), second, third, approach];
+    };
+
+    let next = ctx.currentTime + 0.3, barIdx = 0, phrase = 0;
+    const schedule = () => {
+      while (next < ctx.currentTime + 2.5) {
+        const bar = bars[barIdx % bars.length], nb = bars[(barIdx + 1) % bars.length];
+        const line = walk(bar, nb);
+        for (let b = 0; b < 4; b++) {
+          const t = next + b * beat;
+          bass(line[b], t, b === 0 ? 0.15 : 0.12);
+          ride(t, b % 2 ? 0.2 : 0.24);                                   // ding... ding
+          if (b % 2) { ride(t + swing, 0.14); brush(t, 0.16); }           // ...ga-ding on the swung "and", brushes on 2 & 4
+        }
+        // piano comping: Charleston-style hits on 1 and the swung "and" of 2, sometimes on 4
+        const voicing = bar.chord.map((m) => m + 12);
+        voicing.forEach((m, i) => ep(m, next + i * 0.008, beat * 1.4, 0.12));
+        if (Math.random() < 0.7) voicing.forEach((m) => ep(m, next + beat + swing, beat * 0.9, 0.085));
+        if (Math.random() < 0.35) voicing.slice(1).forEach((m) => ep(m, next + 3 * beat, beat * 0.8, 0.075));
+        // a few melody notes every other phrase
+        if (phrase % 2 === 1) {
+          for (let k = 0; k < 4; k++) {
+            if (Math.random() < 0.45) {
+              const t = next + k * beat + (Math.random() < 0.5 ? swing : 0);
+              ep(scale[Math.floor(Math.random() * scale.length)], t, beat * 1.2, 0.11);
+            }
+          }
+        }
+        next += 4 * beat; barIdx++;
+        if (barIdx % 8 === 0) phrase++;
+      }
+    };
+    schedule();
+    const timer = setInterval(schedule, 250);
+    return () => clearInterval(timer);
   },
 
   lofi(ctx, out) {
@@ -1170,7 +1286,7 @@ const TOOL_PAGES = {
     const notifOn = "Notification" in window && Notification.permission === "granted" && s.notifications;
     return `<div class="card settings">
       <div class="setting-row"><span class="lbl">Appearance</span>
-        <select id="setTheme" class="compact">${[["auto", "Automatic"], ["light", "Light"], ["dark", "Dark"]].map(([v, l]) => `<option value="${v}" ${s.theme === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+        <select id="setTheme" class="compact">${[["light", "Light"], ["dark", "Dark"], ["system", "Match system"]].map(([v, l]) => `<option value="${v}" ${s.theme === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
       <div class="setting-row"><span class="lbl">Remind me</span>
         <select id="setAlert" class="compact">${[[12, "12 hours before"], [24, "1 day before"], [48, "2 days before"], [72, "3 days before"], [168, "1 week before"]].map(([h, l]) => `<option value="${h}" ${s.alertHours === h ? "selected" : ""}>${l}</option>`).join("")}</select></div>
       <div class="setting-row"><span class="lbl">Desktop notifications ${s.notifications ? `<button class="text-btn" data-action="test-notif">Test</button>` : ""}</span>
