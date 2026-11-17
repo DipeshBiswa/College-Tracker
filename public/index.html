@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>College Tracker</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎓</text></svg>" />
+  <link rel="stylesheet" href="/styles.css" />
+  <script>
+    // Apply saved theme before paint to avoid a flash.
+    try {
+      const t = localStorage.getItem("ct-theme");
+      const dark = t === "dark" || (t !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+      document.documentElement.dataset.theme = dark ? "dark" : "light";
+    } catch (e) {}
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">🎓</span>
+      <span class="brand-name">College Tracker</span>
+    </div>
+    <nav class="tabs" id="tabs">
+      <button data-tab="dashboard" class="active">Dashboard</button>
+      <button data-tab="classes">Classes</button>
+      <button data-tab="exams">Exams</button>
+      <button data-tab="calendar">Calendar</button>
+      <button data-tab="tools">Student Tools</button>
+    </nav>
+    <div class="top-actions">
+      <button class="icon-btn" id="bellBtn" title="What's coming up">
+        🔔<span class="badge" id="bellCount" hidden>0</span>
+      </button>
+      <button class="icon-btn" id="themeBtn" title="Toggle light / dark mode">🌙</button>
+    </div>
+  </header>
+
+  <div class="alert-drawer" id="alertDrawer" hidden></div>
+
+  <main>
+    <section id="view-dashboard" class="view active"></section>
+    <section id="view-classes" class="view"></section>
+    <section id="view-exams" class="view"></section>
+    <section id="view-calendar" class="view"></section>
+    <section id="view-tools" class="view"></section>
+  </main>
+
+  <dialog id="formDialog">
+    <form method="dialog" id="dialogForm">
+      <h2 id="dialogTitle"></h2>
+      <div id="dialogFields"></div>
+      <div class="dialog-actions">
+        <button type="button" class="btn ghost" id="dialogCancel">Cancel</button>
+        <button type="submit" class="btn primary" id="dialogSubmit">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+# Your personal data stays on your computer (not pushed to GitHub).
+# Remove the next line if you DO want your data committed (e.g. to sync between computers via a private repo).
+data/
+
+node_modules/
+.DS_Store
+Thumbs.db
+*.log
