@@ -718,6 +718,252 @@ function renderCalendar() {
     </div>`;
 }
 
+/* ================= Study music (generated live, works offline) ================= */
+
+const TRACKS = [
+  { id: "lofi", name: "Lo-fi keys", sub: "Soft piano chords" },
+  { id: "rain", name: "Rain", sub: "Steady and gentle" },
+  { id: "waves", name: "Ocean waves", sub: "Slow and rolling" },
+  { id: "pad", name: "Soft pad", sub: "Warm ambient hum" },
+  { id: "brown", name: "Brown noise", sub: "Deep focus" },
+];
+
+const music = { ctx: null, master: null, playing: {}, paused: false, embed: false };
+
+function musicCtx() {
+  if (!music.ctx) {
+    music.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    music.master = music.ctx.createGain();
+    music.master.gain.value = musicVol();
+    music.master.connect(music.ctx.destination);
+  }
+  if (music.ctx.state === "suspended" && !music.paused) music.ctx.resume();
+  return music.ctx;
+}
+const musicVol = () => ((state.settings.musicVolume ?? 50) / 100) ** 1.5 * 0.9;
+
+function noiseBuffer(ctx, kind, seconds = 6) {
+  const len = Math.floor(ctx.sampleRate * seconds), buf = ctx.createBuffer(2, len, ctx.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = buf.getChannelData(ch);
+    let last = 0, b0 = 0, b1 = 0, b2 = 0;
+    for (let i = 0; i < len; i++) {
+      const w = Math.random() * 2 - 1;
+      if (kind === "brown") { last = (last + 0.02 * w) / 1.02; d[i] = last * 3.5; }
+      else { b0 = 0.997 * b0 + w * 0.029591; b1 = 0.985 * b1 + w * 0.032534; b2 = 0.95 * b2 + w * 0.048056; d[i] = (b0 + b1 + b2 + w * 0.05) * 0.9; }
+    }
+  }
+  return buf;
+}
+
+function loopNoise(ctx, kind) {
+  const src = ctx.createBufferSource();
+  src.buffer = noiseBuffer(ctx, kind); src.loop = true;
+  return src;
+}
+
+function fadeIn(ctx, g, to, secs = 2.5) {
+  g.gain.setValueAtTime(0.0001, ctx.currentTime);
+  g.gain.exponentialRampToValueAtTime(to, ctx.currentTime + secs);
+}
+
+// Each track builder returns a stop() function.
+const TRACK_BUILDERS = {
+  brown(ctx, out) {
+    const src = loopNoise(ctx, "brown");
+    const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 500;
+    const g = ctx.createGain(); fadeIn(ctx, g, 0.55);
+    src.connect(lp).connect(g).connect(out); src.start();
+    return () => src.stop();
+  },
+
+  rain(ctx, out) {
+    const src = loopNoise(ctx, "pink");
+    const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 350;
+    const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 5200;
+    const g = ctx.createGain(); fadeIn(ctx, g, 0.4);
+    src.connect(hp).connect(lp).connect(g).connect(out); src.start();
+    // occasional soft droplets
+    const drops = ctx.createGain(); drops.gain.value = 0.12; drops.connect(out);
+    const dropBuf = noiseBuffer(ctx, "pink", 0.05);
+    const timer = setInterval(() => {
+      const now = ctx.currentTime;
+      for (let i = 0; i < 6; i++) {
+        if (Math.random() > 0.55) continue;
+        const t = now + Math.random() * 0.4;
+        const d = ctx.createBufferSource(); d.buffer = dropBuf;
+        const bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = 2500 + Math.random() * 3500; bp.Q.value = 6;
+        const dg = ctx.createGain();
+        dg.gain.setValueAtTime(0.0001, t); dg.gain.exponentialRampToValueAtTime(0.4 + Math.random() * 0.6, t + 0.002);
+        dg.gain.exponentialRampToValueAtTime(0.0001, t + 0.03);
+        d.connect(bp).connect(dg).connect(drops); d.start(t); d.stop(t + 0.05);
+      }
+    }, 400);
+    return () => { clearInterval(timer); src.stop(); };
+  },
+
+  waves(ctx, out) {
+    const src = loopNoise(ctx, "brown");
+    const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 900;
+    const swell = ctx.createGain(); swell.gain.value = 0.35;
+    const lfo = ctx.createOscillator(); lfo.frequency.value = 0.08;          // one wave every ~12s
+    const depth = ctx.createGain(); depth.gain.value = 0.3;
+    lfo.connect(depth).connect(swell.gain);
+    const cut = ctx.createGain(); cut.gain.value = 500; lfo.connect(cut).connect(lp.frequency);
+    const g = ctx.createGain(); fadeIn(ctx, g, 2.4);
+    src.connect(lp).connect(swell).connect(g).connect(out); src.start(); lfo.start();
+    return () => { src.stop(); lfo.stop(); };
+  },
+
+  pad(ctx, out) {
+    const chords = [[45, 52, 55, 59, 64], [41, 48, 52, 57, 60], [43, 50, 55, 59, 62], [40, 47, 52, 55, 59]]; // Am9 · Fmaj7 · G6 · Em7
+    const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 700; lp.Q.value = 0.5;
+    const lfo = ctx.createOscillator(); lfo.frequency.value = 0.05;
+    const lfoG = ctx.createGain(); lfoG.gain.value = 250; lfo.connect(lfoG).connect(lp.frequency); lfo.start();
+    const bus = ctx.createGain(); fadeIn(ctx, bus, 0.42, 4); lp.connect(bus).connect(out);
+    const voices = [];
+    let i = 0;
+    const play = () => {
+      const t = ctx.currentTime;
+      voices.splice(0).forEach(({ o, g }) => { g.gain.cancelScheduledValues(t); g.gain.setValueAtTime(g.gain.value, t); g.gain.linearRampToValueAtTime(0, t + 5); o.stop(t + 5.1); });
+      for (const m of chords[i++ % chords.length]) for (const det of [-6, 6]) {
+        const o = ctx.createOscillator(); o.type = "triangle";
+        o.frequency.value = 440 * 2 ** ((m - 69) / 12); o.detune.value = det;
+        const g = ctx.createGain(); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.12, t + 5);
+        o.connect(g).connect(lp); o.start(t); voices.push({ o, g });
+      }
+    };
+    play();
+    const timer = setInterval(play, 14000);
+    return () => { clearInterval(timer); voices.forEach(({ o }) => { try { o.stop(); } catch {} }); lfo.stop(); };
+  },
+
+  lofi(ctx, out) {
+    const bpm = 70, beat = 60 / bpm;
+    const prog = [[53, 57, 60, 64], [52, 55, 59, 62], [50, 53, 57, 60], [48, 52, 55, 59]];    // Fmaj7 · Em7 · Dm7 · Cmaj7
+    const scale = [72, 74, 76, 79, 81, 84];                                                    // C pentatonic
+    const tone = ctx.createBiquadFilter(); tone.type = "lowpass"; tone.frequency.value = 1700;
+    const bus = ctx.createGain(); fadeIn(ctx, bus, 0.85, 2); tone.connect(bus).connect(out);
+    // gentle tape wobble
+    const wob = ctx.createOscillator(); wob.frequency.value = 0.4; const wobG = ctx.createGain(); wobG.gain.value = 6; wob.connect(wobG); wob.start();
+    // vinyl crackle
+    const crk = ctx.createBufferSource(); const cb = ctx.createBuffer(1, ctx.sampleRate * 4, ctx.sampleRate); const cd = cb.getChannelData(0);
+    for (let i = 0; i < cd.length; i++) cd[i] = Math.random() < 0.0006 ? (Math.random() * 2 - 1) : (Math.random() * 2 - 1) * 0.01;
+    crk.buffer = cb; crk.loop = true; const ch = ctx.createBiquadFilter(); ch.type = "highpass"; ch.frequency.value = 1500;
+    const cg = ctx.createGain(); cg.gain.value = 0.18; crk.connect(ch).connect(cg).connect(out); crk.start();
+
+    const key = (midi, t, len, vel) => {
+      const f = 440 * 2 ** ((midi - 69) / 12);
+      const g = ctx.createGain(); g.connect(tone);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vel, t + 0.015);
+      g.gain.exponentialRampToValueAtTime(vel * 0.35, t + 0.6); g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+      for (const [mult, amp] of [[1, 1], [2, 0.18], [3, 0.05]]) {
+        const o = ctx.createOscillator(); o.type = "sine"; o.frequency.value = f * mult; wobG.connect(o.detune);
+        const a = ctx.createGain(); a.gain.value = amp; o.connect(a).connect(g); o.start(t); o.stop(t + len + 0.05);
+      }
+    };
+    let next = ctx.currentTime + 0.3, step = 0;
+    const schedule = () => {
+      while (next < ctx.currentTime + 2.5) {
+        const bar = Math.floor(step / 8), pos = step % 8;                    // 8 eighth-notes per bar, 1 chord per bar
+        const chord = prog[bar % prog.length];
+        const swing = pos % 2 ? beat * 0.08 : 0;
+        const t = next + swing;
+        if (pos === 0) chord.forEach((m, i) => key(m, t + i * 0.012, beat * 3.8, 0.11));
+        if (pos === 5) chord.slice(1).forEach((m) => key(m, t, beat * 1.6, 0.06));
+        if (pos === 0) key(chord[0] - 12, t, beat * 3.5, 0.12);              // soft bass note
+        if (pos !== 0 && Math.random() < 0.22) key(scale[Math.floor(Math.random() * scale.length)], t, beat * 1.4, 0.05);
+        next += beat / 2; step++;
+      }
+    };
+    schedule();
+    const timer = setInterval(schedule, 250);
+    return () => { clearInterval(timer); crk.stop(); wob.stop(); };
+  },
+};
+
+function toggleTrack(id) {
+  const ctx = musicCtx();
+  if (music.playing[id]) {
+    const stop = music.playing[id]; delete music.playing[id];
+    stop();
+  } else {
+    if (music.paused) { music.paused = false; ctx.resume(); }
+    const out = ctx.createGain(); out.connect(music.master);
+    const stop = TRACK_BUILDERS[id](ctx, out);
+    music.playing[id] = () => {
+      const t = ctx.currentTime; out.gain.setValueAtTime(1, t); out.gain.linearRampToValueAtTime(0, t + 1.2);
+      setTimeout(() => { try { stop(); } catch {} out.disconnect(); }, 1300);
+    };
+  }
+  sfx("click");
+  updateMusicUI();
+}
+
+function stopAllMusic() {
+  Object.keys(music.playing).forEach((id) => { music.playing[id](); delete music.playing[id]; });
+  closeEmbed();
+  music.paused = false;
+  updateMusicUI();
+}
+
+function togglePauseMusic() {
+  if (!music.ctx) return;
+  music.paused = !music.paused;
+  music.paused ? music.ctx.suspend() : music.ctx.resume();
+  updateMusicUI();
+}
+
+// Your own playlist: YouTube or Spotify link -> embedded player
+function embedUrl(link) {
+  try {
+    const u = new URL(link.trim());
+    const host = u.hostname.replace(/^www\.|^m\./, "");
+    if (host === "youtu.be") return `https://www.youtube.com/embed/${u.pathname.slice(1)}?autoplay=1`;
+    if (host.endsWith("youtube.com")) {
+      const list = u.searchParams.get("list"), v = u.searchParams.get("v");
+      if (v) return `https://www.youtube.com/embed/${v}?autoplay=1${list ? "&list=" + list : ""}`;
+      if (list) return `https://www.youtube.com/embed/videoseries?list=${list}&autoplay=1`;
+      const m = u.pathname.match(/\/(?:live|embed|shorts)\/([\w-]+)/);
+      if (m) return `https://www.youtube.com/embed/${m[1]}?autoplay=1`;
+    }
+    if (host === "open.spotify.com") {
+      const m = u.pathname.match(/\/(playlist|album|track|episode|show)\/([\w]+)/);
+      if (m) return `https://open.spotify.com/embed/${m[1]}/${m[2]}`;
+    }
+  } catch {}
+  return null;
+}
+
+function openEmbed() {
+  const link = state.settings.musicUrl || "";
+  const src = embedUrl(link);
+  if (!src) { toast("Paste a YouTube or Spotify link first"); return; }
+  const spotify = src.includes("spotify");
+  $("#musicEmbed").innerHTML = `<iframe src="${esc(src)}" title="Your playlist" width="100%" height="${spotify ? 152 : 180}" frameborder="0"
+    allow="autoplay; clipboard-write; encrypted-media; picture-in-picture" loading="lazy"></iframe>`;
+  $("#musicEmbed").hidden = false;
+  music.embed = true;
+  updateMusicUI();
+}
+function closeEmbed() { $("#musicEmbed").innerHTML = ""; $("#musicEmbed").hidden = true; music.embed = false; }
+
+function updateMusicUI() {
+  const ids = Object.keys(music.playing);
+  const names = ids.map((id) => TRACKS.find((t) => t.id === id).name);
+  if (music.embed) names.push("Your playlist");
+  const dock = $("#musicDock");
+  dock.hidden = !names.length;
+  $("#musicNow").textContent = names.join(" + ");
+  $("#musicPause").textContent = music.paused ? "Play" : "Pause";
+  $("#musicPause").hidden = !ids.length;
+  $$(".track").forEach((el) => el.classList.toggle("on", !!music.playing[el.dataset.track]));
+  const eb = $("#embedBtn"); if (eb) eb.textContent = music.embed ? "Close player" : "Play";
+}
+
+$("#musicPause").addEventListener("click", togglePauseMusic);
+$("#musicStop").addEventListener("click", stopAllMusic);
+
 /* ================= Student tools ================= */
 
 const GRADE_POINTS = { "A+": 4.0, A: 4.0, "A-": 3.7, "B+": 3.3, B: 3.0, "B-": 2.7, "C+": 2.3, C: 2.0, "C-": 1.7, "D+": 1.3, D: 1.0, "D-": 0.7, F: 0 };
@@ -763,6 +1009,21 @@ function renderTools() {
             <label>Break <input type="number" data-pomo="short" value="${p.short}" min="1" max="60"/></label>
             <label>Long <input type="number" data-pomo="long" value="${p.long}" min="1" max="60"/></label>
           </div>
+        </details>
+      </div>
+
+      <div class="card">
+        <h2>Study music</h2>
+        <div class="tracks">${TRACKS.map((t) => `<button class="track ${music.playing[t.id] ? "on" : ""}" data-action="track" data-track="${t.id}">
+          <span class="eq"><i></i><i></i><i></i></span><span class="tname">${t.name}</span><span class="tsub">${t.sub}</span></button>`).join("")}</div>
+        <div class="setting-row" style="padding-bottom:.2rem"><span class="muted small" style="flex:none">Volume</span>
+          <input type="range" id="musicVolume" min="0" max="100" value="${state.settings.musicVolume ?? 50}"/></div>
+        <details class="mini" ${state.settings.musicUrl ? "open" : ""}><summary>Your own playlist</summary>
+          <div class="row" style="margin-top:.5rem;flex-wrap:nowrap">
+            <input type="url" id="musicUrl" value="${esc(state.settings.musicUrl || "")}" placeholder="Paste a YouTube or Spotify link"/>
+            <button class="btn small-install" id="embedBtn" data-action="embed" style="flex:none">${music.embed ? "Close player" : "Play"}</button>
+          </div>
+          <div class="small muted" style="margin-top:.35rem">Playlists need an internet connection.</div>
         </details>
       </div>
 
@@ -835,9 +1096,9 @@ function renderTools() {
         <select id="setAlert" class="compact">${[[12, "12 hours before"], [24, "1 day before"], [48, "2 days before"], [72, "3 days before"], [168, "1 week before"]].map(([h, l]) => `<option value="${h}" ${s.alertHours === h ? "selected" : ""}>${l}</option>`).join("")}</select></div>
       <div class="setting-row"><span class="lbl">Desktop notifications</span>
         <label class="switch"><input type="checkbox" id="setNotifs" ${notifOn ? "checked" : ""}/><span></span></label></div>
-      <div class="setting-row"><span class="lbl">Sounds</span>
+      <div class="setting-row"><span class="lbl">Click sounds</span>
         <label class="switch"><input type="checkbox" id="setSounds" ${s.sounds === false ? "" : "checked"}/><span></span></label></div>
-      ${s.sounds === false ? "" : `<div class="setting-row"><span class="lbl muted">Volume</span><input type="range" id="setVolume" min="0" max="100" value="${s.volume ?? 60}" style="max-width:180px"/></div>`}
+      ${s.sounds === false ? "" : `<div class="setting-row"><span class="lbl muted">Click volume</span><input type="range" id="setVolume" min="0" max="100" value="${s.volume ?? 60}" style="max-width:180px"/></div>`}
       ${isInstalled() ? "" : `<div class="setting-row"><span class="lbl">Install as an app</span><button class="text-btn" data-action="install-app">${installPrompt ? "Install" : "How?"}</button></div>`}
       <div class="setting-row"><span class="lbl">Backup</span>
         <span class="row" style="flex:none;gap:.4rem"><button class="text-btn" data-action="export">Export</button><label class="text-btn">Import<input type="file" id="importFile" accept=".json,application/json" hidden/></label></span></div>
@@ -1038,6 +1299,8 @@ document.addEventListener("click", (e) => {
       });
     case "link-remove": state.links.splice(Number(el.dataset.i), 1); save(); return renderTools();
     case "export": return exportData();
+    case "track": return toggleTrack(el.dataset.track);
+    case "embed": return music.embed ? (closeEmbed(), updateMusicUI()) : openEmbed();
     case "install-app": return installApp();
     case "toggle-sounds": state.settings.sounds = state.settings.sounds === false; save(); renderTools(); return sfx("complete");
     case "preview-sound": { const names = ["complete", "add", "alert", "timer", "allDone"]; return sfx(names[Math.floor(Math.random() * names.length)]); }
@@ -1051,6 +1314,8 @@ document.addEventListener("input", (e) => {
   if (t.id === "gpaPrior") { state.gpa.priorGpa = t.value; save(); return calcGpa(); }
   if (t.id === "gpaPriorCr") { state.gpa.priorCredits = t.value; save(); return calcGpa(); }
   if (t.id === "quickNotes") { state.notes = t.value; return save(); }
+  if (t.id === "musicVolume") { state.settings.musicVolume = Number(t.value); if (music.master) music.master.gain.setTargetAtTime(musicVol(), music.ctx.currentTime, 0.05); return save(); }
+  if (t.id === "musicUrl") { state.settings.musicUrl = t.value.trim(); return save(); }
 });
 
 document.addEventListener("change", (e) => {

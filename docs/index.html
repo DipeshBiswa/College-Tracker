@@ -62,6 +62,16 @@
     </form>
   </dialog>
 
+  <div class="music-dock" id="musicDock" hidden>
+    <div id="musicEmbed" hidden></div>
+    <div class="music-bar">
+      <span class="eq playing"><i></i><i></i><i></i></span>
+      <span id="musicNow" class="music-now"></span>
+      <button class="text-btn" id="musicPause">Pause</button>
+      <button class="link-btn" id="musicStop" aria-label="Stop music">✕</button>
+    </div>
+  </div>
+
   <div class="toast" id="toast" hidden></div>
 
   <script src="app.js"></script>
