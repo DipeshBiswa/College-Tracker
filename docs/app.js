@@ -157,6 +157,7 @@ const SOUNDS = {
   theme:    [[0, 170, 0.9, 0.7], [0.11, 190, 0.95, 0.6]],
   alert:    [[0, 200, 1.1, 0.9], [0.13, 200, 1.1, 0.8], [0.26, 230, 1.2, 0.85]],
   timer:    [[0, 125, 0.7, 1], [0.22, 125, 0.7, 0.9]],
+  button:   "button",                                                // focus timer Start / Pause
   allDone:  [[0, 175, 1, 0.8], [0.06, 190, 1.05, 0.75], [0.12, 205, 1.1, 0.75], [0.18, 225, 1.15, 0.85]],
 };
 
@@ -196,6 +197,40 @@ function keystroke(ctx, out, t, pitch, bright, loud) {
   n2.start(t + 0.012); n2.stop(t + 0.05);
 }
 
+// Chunky physical-button "click-clack" (press, then release), used for the focus timer Start/Pause.
+function buttonPress(ctx, out, t) {
+  const part = (at, ring, loud, thud) => {
+    // sharp contact click
+    const n = ctx.createBufferSource(); n.buffer = noiseBuf;
+    const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 2500;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(0.9 * loud, at + 0.0008);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + 0.009);
+    n.connect(hp).connect(g).connect(out); n.start(at); n.stop(at + 0.02);
+    // plastic body ring
+    const n2 = ctx.createBufferSource(); n2.buffer = noiseBuf;
+    const bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = ring; bp.Q.value = 9;
+    const g2 = ctx.createGain();
+    g2.gain.setValueAtTime(0.0001, at);
+    g2.gain.exponentialRampToValueAtTime(2.2 * loud, at + 0.001);
+    g2.gain.exponentialRampToValueAtTime(0.0001, at + 0.035);
+    n2.connect(bp).connect(g2).connect(out); n2.start(at); n2.stop(at + 0.05);
+    // low thud of the button bottoming out
+    if (thud) {
+      const o = ctx.createOscillator(); o.type = "sine";
+      o.frequency.setValueAtTime(140, at); o.frequency.exponentialRampToValueAtTime(70, at + 0.03);
+      const g3 = ctx.createGain();
+      g3.gain.setValueAtTime(0.0001, at);
+      g3.gain.exponentialRampToValueAtTime(0.7 * loud, at + 0.002);
+      g3.gain.exponentialRampToValueAtTime(0.0001, at + 0.04);
+      o.connect(g3).connect(out); o.start(at); o.stop(at + 0.05);
+    }
+  };
+  part(t, 1650, 1, true);            // press
+  part(t + 0.075, 2300, 0.55, false); // release
+}
+
 function sfx(name) {
   const s = state.settings;
   if (s.sounds === false) return;
@@ -213,6 +248,7 @@ function sfx(name) {
     master.gain.value = ((s.volume ?? 60) / 100) * 0.5;
     master.connect(audioCtx.destination);
     const t0 = audioCtx.currentTime + 0.005;
+    if (keys === "button") return buttonPress(audioCtx, master, t0);
     for (const [delay, pitch, bright, loud] of keys) keystroke(audioCtx, master, t0 + delay, pitch, bright, loud);
   } catch {}
 }
@@ -985,7 +1021,7 @@ document.addEventListener("click", (e) => {
     case "pomo-start":
       if (pomo.running) stopPomo();
       else { pomo.running = true; pomo.timer = setInterval(pomoTick, 1000); }
-      sfx("click");
+      sfx("button");
       return updatePomoDisplay();
     case "pomo-reset": return setPomoMode(pomo.mode, false);
     case "gpa-add": state.gpa.courses.push({ name: "", credits: "3", grade: "A" }); save(); return renderTools();
