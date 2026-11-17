@@ -1,5 +1,5 @@
 // College Tracker service worker: lets the installed app open instantly and work offline.
-const CACHE = "college-tracker-v8";
+const CACHE = "college-tracker-v9";
 const FILES = [
   "./",
   "index.html",

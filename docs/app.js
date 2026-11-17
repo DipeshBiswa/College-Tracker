@@ -287,8 +287,11 @@ function showTab(tab) {
   render();
   try { history.replaceState(null, "", "#" + tab); } catch {}
 }
-$("#toolsBtn").addEventListener("click", () => { sfx("click"); toolsUi.open = null; showTab("tools"); });
-$("#tabs").addEventListener("click", (e) => { const b = e.target.closest("button[data-tab]"); if (b) { sfx("click"); showTab(b.dataset.tab); } });
+$("#toolsBtn").addEventListener("click", () => toggleDrawer());
+$("#drawerClose").addEventListener("click", () => { sfx("click"); closeDrawer(); });
+$("#toolsBackdrop").addEventListener("click", () => closeDrawer());
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && drawerOpen() && !$("#formDialog").open) closeDrawer(); });
+$("#tabs").addEventListener("click", (e) => { const b = e.target.closest("button[data-tab]"); if (b) { sfx("click"); closeDrawer(); showTab(b.dataset.tab); } });
 
 /* ================= Form dialog ================= */
 
@@ -322,6 +325,7 @@ function openForm({ title, fields, submitLabel = "Save", onSubmit, onDelete }) {
     if (onSubmit(values) !== false) dlg.close();
   };
   $("#dialogCancel").onclick = () => dlg.close();
+  initPickers(dlg);
   dlg.showModal();
   sfx("open");
   const first = $("input:not([type=hidden]):not([type=checkbox]), select, textarea", dlg);
@@ -341,6 +345,19 @@ function fieldHtml(f) {
       input = `<div class="days">${DOW.map((d, i) => `<label><input type="checkbox" name="${f.name}" value="${i}" ${(f.value || []).includes(i) ? "checked" : ""}/><span>${d}</span></label>`).join("")}</div>`; break;
     case "color":
       input = `<div class="swatches">${COLORS.map((c) => `<button type="button" class="swatch ${c === f.value ? "sel" : ""}" data-for="${f.name}" data-color="${c}" style="background:${c}"></button>`).join("")}<input type="color" name="${f.name}" value="${val || COLORS[0]}"/></div>`; break;
+    case "datetime-local":
+      return `<div class="field"><span>${esc(f.label)}</span>
+        <div class="dt" data-kind="datetime">
+          <input type="hidden" name="${f.name}" value="${val}"/>
+          <button type="button" class="dt-btn grow2" data-pick="date">${PICK_ICONS.cal}<span class="dt-label"></span></button>
+          <button type="button" class="dt-btn" data-pick="time">${PICK_ICONS.clock}<span class="dt-label"></span></button>
+        </div></div>`;
+    case "time":
+      return `<div class="field"><span>${esc(f.label)}</span>
+        <div class="dt" data-kind="time">
+          <input type="hidden" name="${f.name}" value="${val}"/>
+          <button type="button" class="dt-btn grow2" data-pick="time">${PICK_ICONS.clock}<span class="dt-label"></span></button>
+        </div></div>`;
     case "checkbox":
       return `<label class="field row" style="justify-content:flex-start;gap:.5rem"><input type="checkbox" class="check" name="${f.name}" ${f.value ? "checked" : ""} style="flex:none"/><span style="margin:0">${esc(f.label)}</span></label>`;
     case "row":
@@ -352,6 +369,130 @@ function fieldHtml(f) {
   }
   return `<label class="field"><span>${esc(f.label)}</span>${input}</label>`;
 }
+
+/* ================= Date & time pickers (styled to match the app) ================= */
+
+const PICK_ICONS = {
+  cal: '<svg viewBox="0 0 20 20" width="16" height="16"><rect x="3" y="4.5" width="14" height="12.5" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M3 8.5h14M7 3v3M13 3v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  clock: '<svg viewBox="0 0 20 20" width="16" height="16"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10 6.2V10l2.6 1.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+};
+const picker = { el: null, dt: null, kind: null, month: null };
+
+const fmtPickDate = (ds) => {
+  const d = new Date(ds + "T00:00");
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  const days = Math.round((d - startOfDay(new Date())) / DAY);
+  const base = d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", ...(sameYear ? {} : { year: "numeric" }) });
+  return days === 0 ? `Today · ${base}` : days === 1 ? `Tomorrow · ${base}` : base;
+};
+const fmtPickTime = (t) => (t ? fmtTime(t) : "Not set");
+
+function dtParts(dt) {
+  const v = $("input[type=hidden]", dt).value || "";
+  return dt.dataset.kind === "time" ? { date: "", time: v } : { date: v.slice(0, 10), time: v.slice(11, 16) };
+}
+function dtSet(dt, { date, time }) {
+  const input = $("input[type=hidden]", dt);
+  input.value = dt.dataset.kind === "time" ? (time || "") : `${date}T${time || "23:59"}`;
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+  dtRefresh(dt);
+}
+function dtRefresh(dt) {
+  const { date, time } = dtParts(dt);
+  const dateBtn = $('[data-pick="date"] .dt-label', dt), timeBtn = $('[data-pick="time"] .dt-label', dt);
+  if (dateBtn) dateBtn.textContent = date ? fmtPickDate(date) : "Pick a date";
+  if (timeBtn) { timeBtn.textContent = fmtPickTime(time); timeBtn.parentElement.classList.toggle("empty", !time); }
+}
+function initPickers(root) { $$(".dt", root).forEach(dtRefresh); }
+
+function closePicker() { if (picker.el) { picker.el.remove(); picker.el = null; } $$(".dt-btn.open").forEach((b) => b.classList.remove("open")); picker.dt = null; }
+
+function openPicker(btn) {
+  const dt = btn.closest(".dt"), kind = btn.dataset.pick;
+  if (picker.el && picker.dt === dt && picker.kind === kind) return closePicker();
+  closePicker();
+  picker.dt = dt; picker.kind = kind;
+  const { date } = dtParts(dt);
+  const base = date ? new Date(date + "T00:00") : new Date();
+  picker.month = new Date(base.getFullYear(), base.getMonth(), 1);
+  const pop = document.createElement("div");
+  pop.className = `picker-pop ${kind === "date" ? "cal-pop" : "time-pop"}`;
+  pop.addEventListener("click", (e) => e.stopPropagation());
+  dt.appendChild(pop);
+  picker.el = pop;
+  btn.classList.add("open");
+  kind === "date" ? renderCalPop() : renderTimePop();
+  // align under the button; flip above if there's no room below
+  pop.style.left = `${btn.offsetLeft}px`;
+  if (kind === "time") pop.style.minWidth = `${Math.max(btn.offsetWidth, 190)}px`;
+  const r = pop.getBoundingClientRect();
+  if (r.bottom > window.innerHeight - 8 && btn.getBoundingClientRect().top > r.height + 16) pop.classList.add("above");
+  if (r.right > window.innerWidth - 8) { pop.style.left = "auto"; pop.style.right = "0"; }
+}
+
+function renderCalPop() {
+  const pop = picker.el, dt = picker.dt, m = picker.month;
+  const { date } = dtParts(dt), todayK = dateKey(new Date());
+  const start = new Date(m); start.setDate(1 - m.getDay());
+  let cells = "";
+  for (let i = 0; i < 42; i++) {
+    const d = new Date(start); d.setDate(start.getDate() + i);
+    const k = dateKey(d);
+    cells += `<button type="button" class="pp-day ${d.getMonth() !== m.getMonth() ? "other" : ""} ${k === todayK ? "today" : ""} ${k === date ? "sel" : ""}" data-day="${k}">${d.getDate()}</button>`;
+  }
+  pop.innerHTML = `
+    <div class="pp-head">
+      <button type="button" class="pp-nav" data-nav="-1" aria-label="Previous month">‹</button>
+      <span>${m.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</span>
+      <button type="button" class="pp-nav" data-nav="1" aria-label="Next month">›</button>
+    </div>
+    <div class="pp-grid">${["S", "M", "T", "W", "T", "F", "S"].map((x) => `<span class="pp-dow">${x}</span>`).join("")}${cells}</div>
+    <div class="pp-quick">
+      <button type="button" data-quick="0">Today</button><button type="button" data-quick="1">Tomorrow</button><button type="button" data-quick="7">Next week</button>
+    </div>`;
+  pop.onclick = (e) => {
+    e.stopPropagation();
+    const nav = e.target.closest("[data-nav]"), day = e.target.closest("[data-day]"), q = e.target.closest("[data-quick]");
+    if (nav) { picker.month = new Date(m.getFullYear(), m.getMonth() + Number(nav.dataset.nav), 1); return renderCalPop(); }
+    let k = null;
+    if (day) k = day.dataset.day;
+    if (q) { const d = new Date(); d.setDate(d.getDate() + Number(q.dataset.quick)); k = dateKey(d); }
+    if (k) { const { time } = dtParts(dt); dtSet(dt, { date: k, time }); sfx("click"); closePicker(); }
+  };
+}
+
+function renderTimePop() {
+  const pop = picker.el, dt = picker.dt;
+  const { time } = dtParts(dt);
+  const times = [];
+  for (let h = 0; h < 24; h++) for (const mm of [0, 15, 30, 45]) times.push(`${pad(h)}:${pad(mm)}`);
+  times.push("23:59");
+  if (time && !times.includes(time)) { times.push(time); times.sort(); }
+  const quick = ["09:00", "12:00", "17:00", "23:59"];
+  pop.innerHTML = `
+    <div class="pp-quick top">${quick.map((t) => `<button type="button" data-time="${t}" class="${t === time ? "sel" : ""}">${fmtTime(t)}</button>`).join("")}</div>
+    <div class="pp-times">${times.map((t) => `<button type="button" class="pp-time ${t === time ? "sel" : ""}" data-time="${t}">${fmtTime(t)}</button>`).join("")}</div>
+    ${dt.dataset.kind === "time" ? `<div class="pp-quick"><button type="button" data-time="">Clear</button></div>` : ""}`;
+  const list = $(".pp-times", pop);
+  const target = $(".pp-time.sel", pop) || $(`.pp-time[data-time="${dt.dataset.kind === "time" ? "09:00" : "17:00"}"]`, pop);
+  if (target) list.scrollTop = target.offsetTop - list.clientHeight / 2 + target.offsetHeight / 2;
+  pop.onclick = (e) => {
+    e.stopPropagation();
+    const b = e.target.closest("[data-time]");
+    if (!b) return;
+    const { date } = dtParts(dt);
+    dtSet(dt, { date, time: b.dataset.time }); sfx("click"); closePicker();
+  };
+}
+
+$("#formDialog").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-pick]");
+  if (btn) { e.preventDefault(); return openPicker(btn); }
+  if (picker.el && !e.target.closest(".picker-pop")) closePicker();
+});
+// Esc closes an open picker first instead of the whole form
+$("#formDialog").addEventListener("cancel", (e) => { if (picker.el) { e.preventDefault(); closePicker(); } });
+$("#formDialog").addEventListener("close", closePicker);
 
 /* ================= CRUD ================= */
 
@@ -416,10 +557,8 @@ function editAssignment(id, classId, due) {
     title: id ? "Edit assignment" : "New assignment",
     fields: [
       { name: "title", label: "What's due?", value: a.title, required: true, placeholder: "Lab report #3" },
-      { type: "row", fields: [
-        { name: "classId", label: "Class", type: "select", options: classOptions(false), value: a.classId || classId || state.classes[0]?.id },
-        { name: "due", label: "Due", type: "datetime-local", value: a.due || due || defaultDue(), required: true },
-      ] },
+      { name: "classId", label: "Class", type: "select", options: classOptions(false), value: a.classId || classId || state.classes[0]?.id },
+      { name: "due", label: "Due", type: "datetime-local", value: a.due || due || defaultDue(), required: true },
       { type: "more", open: !!(a.notes || a.priority === "high"), fields: [
         { name: "priority", label: "Priority", type: "select", value: a.priority || "normal", options: [
           { value: "normal", label: "Normal" }, { value: "high", label: "Important" }] },
@@ -464,10 +603,8 @@ function editExam(id) {
     title: id ? "Edit exam" : "New exam",
     fields: [
       { name: "title", label: "Exam", value: e.title, required: true, placeholder: "Midterm 1" },
-      { type: "row", fields: [
-        { name: "classId", label: "Class", type: "select", options: classOptions(true), value: e.classId },
-        { name: "date", label: "When", type: "datetime-local", value: e.date || toLocalInput(d), required: true },
-      ] },
+      { name: "classId", label: "Class", type: "select", options: classOptions(true), value: e.classId },
+      { name: "date", label: "When", type: "datetime-local", value: e.date || toLocalInput(d), required: true },
       { type: "more", open: !!(e.topics || e.location), fields: [
         { name: "location", label: "Where", value: e.location, placeholder: "Room 110" },
         { name: "topics", label: "What's on it", type: "textarea", value: e.topics, placeholder: "Chapters 1–5" },
@@ -1166,7 +1303,7 @@ function musicStatus() {
   return names.length ? `${paused ? "Paused" : "Playing"}: ${names.join(" + ")}` : "";
 }
 function updateMusicUI() {
-  const hm = $("#hubMusic"); if (hm) hm.textContent = musicStatus() || "Lo-fi, jazz, rain and more";
+  $$(".hub-music").forEach((h) => (h.textContent = musicStatus() || "Lo-fi, jazz, rain and more"));
   const ids = Object.keys(music.playing);
   const names = ids.map((id) => TRACKS.find((t) => t.id === id).name);
   if (music.embed) names.push(music.embedLabel);
@@ -1186,7 +1323,7 @@ $("#musicStop").addEventListener("click", stopAllMusic);
 
 const GRADE_POINTS = { "A+": 4.0, A: 4.0, "A-": 3.7, "B+": 3.3, B: 3.0, "B-": 2.7, "C+": 2.3, C: 2.0, "C-": 1.7, "D+": 1.3, D: 1.0, "D-": 0.7, F: 0 };
 
-const pomo = { mode: "focus", left: null, running: false, timer: null, endAt: 0, count: 0, widgetHidden: false, alarm: null };
+const pomo = { mode: "focus", left: null, running: false, timer: null, endAt: 0, count: 0, alarm: null, saved: { focus: null, short: null, long: null } };
 
 const toolsUi = { open: null };
 
@@ -1200,8 +1337,8 @@ const TOOL_LIST = [
 ];
 
 function toolSubtitle(id) {
-  if (id === "timer") return pomoInProgress() ? `<span id="hubTimer">${pomoLabel()}</span> · ${pomo.running ? (pomo.mode === "focus" ? "focusing" : "on a break") : "paused"}` : `${state.pomodoro.focus}-minute focus sessions with breaks`;
-  if (id === "music") return `<span id="hubMusic">${musicStatus() || "Lo-fi, rain, waves and more"}</span>`;
+  if (id === "timer") return pomoInProgress() ? `<span class="hub-timer">${pomoLabel()}</span> · ${pomo.running ? (pomo.mode === "focus" ? "focusing" : "on a break") : "paused"}` : `${state.pomodoro.focus}-minute focus sessions with breaks`;
+  if (id === "music") return `<span class="hub-music">${musicStatus() || "Lo-fi, jazz, rain and more"}</span>`;
   if (id === "final") return "What score do I need?";
   if (id === "gpa") return state.gpa.courses.length ? `${plural(state.gpa.courses.length, "course")}` : "Semester and cumulative";
   if (id === "notes") return state.notes ? esc(state.notes.split("\n")[0].slice(0, 48)) : "Jot things down";
@@ -1209,26 +1346,55 @@ function toolSubtitle(id) {
   return "";
 }
 
-function openTool(id) { toolsUi.open = id; sfx("click"); renderTools(); window.scrollTo({ top: 0 }); }
+function toolsMenuHtml() {
+  return `<div class="card list-card menu">
+      ${TOOL_LIST.map((t) => `<button class="menu-row" data-action="open-tool" data-tool="${t.id}">
+        <span class="menu-ico" style="--c:${t.tint}">${t.glyph}</span>
+        <span class="grow"><span class="menu-title">${t.name}</span><span class="menu-sub">${toolSubtitle(t.id)}</span></span>
+        <span class="chev">›</span></button>`).join("")}
+    </div>
+    <div class="card list-card menu" style="margin-top:1rem">
+      <button class="menu-row" data-action="open-tool" data-tool="settings">
+        <span class="menu-ico" style="--c:#8e8e93">⚙︎</span>
+        <span class="grow"><span class="menu-title">Settings</span><span class="menu-sub">Appearance, reminders, sounds, backup</span></span>
+        <span class="chev">›</span></button>
+    </div>`;
+}
+
+function openTool(id) {
+  closeDrawer();
+  toolsUi.open = id;
+  sfx("click");
+  if (currentTab !== "tools") showTab("tools"); else renderTools();
+  window.scrollTo({ top: 0 });
+}
+
+/* ---- Tools side panel (slides in from the right) ---- */
+const drawerOpen = () => $("#toolsDrawer").classList.contains("open");
+function renderDrawer() { $("#drawerBody").innerHTML = toolsMenuHtml(); }
+function openDrawer() {
+  renderDrawer();
+  $("#toolsBackdrop").hidden = false;
+  requestAnimationFrame(() => { $("#toolsBackdrop").classList.add("show"); $("#toolsDrawer").classList.add("open"); });
+  $("#toolsDrawer").setAttribute("aria-hidden", "false");
+  $("#toolsBtn").classList.add("active");
+  setTimeout(() => { const f = $("#toolsDrawer .menu-row"); if (f) f.focus({ preventScroll: true }); }, 250);
+}
+function closeDrawer() {
+  if (!drawerOpen()) return;
+  $("#toolsDrawer").classList.remove("open");
+  $("#toolsBackdrop").classList.remove("show");
+  $("#toolsDrawer").setAttribute("aria-hidden", "true");
+  $("#toolsBtn").classList.toggle("active", currentTab === "tools");
+  setTimeout(() => { if (!drawerOpen()) $("#toolsBackdrop").hidden = true; }, 300);
+}
+function toggleDrawer() { sfx("click"); drawerOpen() ? closeDrawer() : openDrawer(); }
 
 function renderTools() {
   const v = $("#view-tools");
   if (!toolsUi.open) {
     queueMicrotask(updateTimerWidget);
-    v.innerHTML = `
-      <div class="page-head"><h1>Tools</h1></div>
-      <div class="card list-card menu">
-        ${TOOL_LIST.map((t) => `<button class="menu-row" data-action="open-tool" data-tool="${t.id}">
-          <span class="menu-ico" style="--c:${t.tint}">${t.glyph}</span>
-          <span class="grow"><span class="menu-title">${t.name}</span><span class="menu-sub">${toolSubtitle(t.id)}</span></span>
-          <span class="chev">›</span></button>`).join("")}
-      </div>
-      <div class="card list-card menu" style="margin-top:1rem">
-        <button class="menu-row" data-action="open-tool" data-tool="settings">
-          <span class="menu-ico" style="--c:#8e8e93">⚙︎</span>
-          <span class="grow"><span class="menu-title">Settings</span><span class="menu-sub">Appearance, reminders, sounds, backup</span></span>
-          <span class="chev">›</span></button>
-      </div>`;
+    v.innerHTML = `<div class="page-head"><h1>Tools</h1></div>${toolsMenuHtml()}`;
     return;
   }
   updateTimerWidget();
@@ -1431,7 +1597,7 @@ function updatePomoDisplay() {
   if (pomo.left == null) pomo.left = pomoTotal();
   const label = pomoLabel(), total = pomoTotal();
   document.title = pomo.running ? `${label} · ${MODE_NAMES[pomo.mode]} · College Tracker` : "College Tracker";
-  const hub = $("#hubTimer"); if (hub) hub.textContent = label;
+  $$(".hub-timer").forEach((h) => (h.textContent = label));
   const el = $("#pomoTime"); if (el) el.textContent = label;
   const ring = $("#pomoRing");
   if (ring) {
@@ -1445,11 +1611,12 @@ function updatePomoDisplay() {
   updateTimerWidget();
 }
 
+const pomoLeftNow = () => (pomo.running ? Math.max(0, Math.ceil((pomo.endAt - Date.now()) / 1000)) : pomo.left ?? pomoTotal());
+
 function startPomo() {
   if (pomo.left == null || pomo.left <= 0) pomo.left = pomoTotal();
   pomo.running = true;
   pomo.endAt = Date.now() + pomo.left * 1000;
-  pomo.widgetHidden = false;
   clearInterval(pomo.timer);
   pomo.timer = setInterval(pomoTick, 500);
   scheduleAlarm(pomo.left);
@@ -1457,17 +1624,47 @@ function startPomo() {
 }
 
 function stopPomo() {
-  if (pomo.running) pomo.left = Math.max(0, Math.ceil((pomo.endAt - Date.now()) / 1000));
+  pomo.left = pomoLeftNow();
   pomo.running = false;
   clearInterval(pomo.timer);
   cancelAlarm();
   updatePomoDisplay();
 }
 
+// Switch Focus / Break / Long break. Each mode remembers its own time, and a running timer keeps running.
 function setPomoMode(mode) {
-  stopPomo();
+  if (mode === pomo.mode) return;
+  const wasRunning = pomo.running, cur = pomoLeftNow();
+  clearInterval(pomo.timer); cancelAlarm(); pomo.running = false;
+  pomo.saved[pomo.mode] = cur > 0 && cur < pomoTotal() ? cur : null;
   pomo.mode = mode;
-  pomo.left = pomoTotal();
+  pomo.left = pomo.saved[mode] ?? pomoTotal();
+  pomo.saved[mode] = null;
+  wasRunning ? startPomo() : updatePomoDisplay();
+}
+
+function resetPomo() {
+  clearInterval(pomo.timer); cancelAlarm(); pomo.running = false;
+  pomo.left = pomoTotal(); pomo.saved[pomo.mode] = null;
+  updatePomoDisplay();
+}
+
+const nextPomoMode = () => (pomo.mode === "focus" ? ((pomo.count + 1) % 4 === 0 ? "long" : "short") : "focus");
+
+// Skip to the next session without counting this one.
+function skipPomo() {
+  const wasRunning = pomo.running, next = nextPomoMode();
+  clearInterval(pomo.timer); cancelAlarm(); pomo.running = false;
+  pomo.saved[pomo.mode] = null; pomo.saved[next] = null;
+  pomo.mode = next; pomo.left = pomoTotal();
+  wasRunning ? startPomo() : updatePomoDisplay();
+  toast(`Skipped to ${MODE_NAMES[next].toLowerCase()}`);
+}
+
+function addPomoMinutes(min) {
+  const left = pomoLeftNow() + min * 60;
+  pomo.left = left;
+  if (pomo.running) { pomo.endAt = Date.now() + left * 1000; scheduleAlarm(left); }
   updatePomoDisplay();
 }
 
@@ -1488,6 +1685,7 @@ function pomoTick() {
     save();
     next = pomo.count % 4 === 0 ? "long" : "short";
   }
+  pomo.saved[finished] = null; pomo.saved[next] = null;
   pomo.mode = next;
   pomo.left = pomoTotal();
   updatePomoDisplay();
@@ -1572,25 +1770,70 @@ function hideAlarmCard() { $("#alarmCard").hidden = true; cancelAlarm(); }
 $("#alarmStop").addEventListener("click", () => { hideAlarmCard(); });
 $("#alarmNext").addEventListener("click", () => { hideAlarmCard(); startPomo(); sfx("button"); });
 
-/* ---- Floating mini timer, visible everywhere except the timer page ---- */
+/* ---- Floating timer: glass card at the top-left. The eye button tucks it away without stopping it. ---- */
+const twState = { collapsed: (() => { try { return localStorage.getItem("ct-tw-collapsed") === "1"; } catch { return false; } })() };
+const ICONS = {
+  play: '<svg viewBox="0 0 16 16" width="16" height="16"><path d="M4.5 2.8v10.4l8.5-5.2z" fill="currentColor"/></svg>',
+  pause: '<svg viewBox="0 0 16 16" width="16" height="16"><path d="M4 2.5h3v11H4zM9 2.5h3v11H9z" fill="currentColor"/></svg>',
+  reset: '<svg viewBox="0 0 16 16" width="16" height="16"><path d="M3 8a5 5 0 1 0 1.5-3.5M3 2.5v3h3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  skip: '<svg viewBox="0 0 16 16" width="16" height="16"><path d="M3 3l7 5-7 5zM11.5 3v10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  eyeOff: '<svg viewBox="0 0 24 24" width="18" height="18"><path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6 0 9.5 7 9.5 7a17 17 0 0 1-3.2 4.1M6.6 6.6C3.9 8.3 2.5 12 2.5 12S6 19 12 19a9.6 9.6 0 0 0 4.5-1.1M9.9 9.9a3 3 0 0 0 4.2 4.2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  eye: '<svg viewBox="0 0 24 24" width="18" height="18"><path d="M2.5 12S6 5 12 5s9.5 7 9.5 7-3.5 7-9.5 7S2.5 12 2.5 12z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>',
+};
+
 function updateTimerWidget() {
   const w = $("#timerWidget"); if (!w) return;
   const onTimerPage = currentTab === "tools" && toolsUi.open === "timer";
-  w.hidden = !pomoInProgress() || pomo.widgetHidden || onTimerPage;
+  w.hidden = !pomoInProgress() || onTimerPage;
+  document.body.dataset.tw = w.hidden ? "" : twState.collapsed ? "peek" : "open";   // lets the page make room on narrower windows
   if (w.hidden) return;
-  $("#twTime").textContent = pomoLabel();
-  $("#twMode").textContent = pomo.running ? MODE_NAMES[pomo.mode] : `${MODE_NAMES[pomo.mode]} · paused`;
-  $("#twToggle").innerHTML = pomo.running ? PAUSE_ICON : PLAY_ICON;
-  $("#twToggle").setAttribute("aria-label", pomo.running ? "Pause timer" : "Resume timer");
-  w.style.setProperty("--p", String(1 - pomo.left / pomoTotal()));
+  const left = pomo.left ?? pomoTotal(), total = pomoTotal();
+  const p = Math.min(1, Math.max(0, 1 - left / total));
+  w.classList.toggle("collapsed", twState.collapsed);
   w.classList.toggle("break", pomo.mode !== "focus");
+  w.style.setProperty("--p", String(p));
+  $("#twCard").hidden = twState.collapsed;
+  $("#twPeek").hidden = !twState.collapsed;
+  if (twState.collapsed) return;
+  $("#twTime").textContent = pomoLabel();
+  const today = state.pomodoro.history[dateKey(new Date())] || 0;
+  $("#twStatus").textContent = `${pomo.running ? (pomo.mode === "focus" ? "Focusing" : "On a break") : "Paused"}${today ? ` · ${plural(today, "session")} today` : ""}`;
+  $("#twToggle").innerHTML = pomo.running ? ICONS.pause : ICONS.play;
+  $("#twToggle").setAttribute("aria-label", pomo.running ? "Pause" : "Resume");
+  $("#twToggle").title = pomo.running ? "Pause" : "Resume";
+  $(".tw-modes").dataset.mode = pomo.mode;
+  $$("[data-tw-mode]").forEach((b) => b.classList.toggle("active", b.dataset.twMode === pomo.mode));
+  $("#twRing").style.strokeDashoffset = String(176 * (1 - p));
 }
-const PLAY_ICON = '<svg viewBox="0 0 16 16" width="12" height="12"><path d="M4 2.5v11l9-5.5z" fill="currentColor"/></svg>';
-const PAUSE_ICON = '<svg viewBox="0 0 16 16" width="12" height="12"><path d="M4 2.5h3v11H4zM9 2.5h3v11H9z" fill="currentColor"/></svg>';
-$("#twToggle").addEventListener("click", (e) => { e.stopPropagation(); pomo.running ? stopPomo() : startPomo(); sfx("button"); if (currentTab === "tools" && !toolsUi.open) renderTools(); });
-$("#twReset").addEventListener("click", (e) => { e.stopPropagation(); setPomoMode(pomo.mode); sfx("click"); });
-$("#twClose").addEventListener("click", (e) => { e.stopPropagation(); pomo.widgetHidden = true; updateTimerWidget(); toast(pomo.running ? "Timer still running. Find it in Tools" : "Timer hidden"); });
-$("#twOpen").addEventListener("click", () => { toolsUi.open = "timer"; showTab("tools"); window.scrollTo({ top: 0 }); });
+
+function setTwCollapsed(v) {
+  twState.collapsed = v;
+  try { localStorage.setItem("ct-tw-collapsed", v ? "1" : "0"); } catch {}
+  sfx("click");
+  updateTimerWidget();
+}
+
+function initTimerWidget() {
+  $("#twHide").innerHTML = ICONS.eyeOff;
+  $("#twPeekIcon").innerHTML = ICONS.eye;
+  $("#twReset").innerHTML = ICONS.reset;
+  $("#twSkip").innerHTML = ICONS.skip;
+  $("#twToggle").addEventListener("click", () => { pomo.running ? stopPomo() : startPomo(); sfx("button"); refreshToolsMenus(); });
+  $("#twReset").addEventListener("click", () => { resetPomo(); sfx("click"); refreshToolsMenus(); });
+  $("#twSkip").addEventListener("click", () => { skipPomo(); sfx("click"); refreshToolsMenus(); });
+  $("#twPlus").addEventListener("click", () => { addPomoMinutes(5); sfx("click"); toast("Added 5 minutes"); });
+  $$("[data-tw-mode]").forEach((b) => b.addEventListener("click", () => { setPomoMode(b.dataset.twMode); sfx("click"); }));
+  $("#twHide").addEventListener("click", () => setTwCollapsed(true));
+  $("#twPeek").addEventListener("click", () => setTwCollapsed(false));
+  $("#twOpen").addEventListener("click", () => { toolsUi.open = "timer"; sfx("click"); showTab("tools"); window.scrollTo({ top: 0 }); });
+}
+initTimerWidget();
+
+// Keep any open Tools menu (page or side panel) showing live status.
+function refreshToolsMenus() {
+  if (currentTab === "tools" && !toolsUi.open) renderTools();
+  if (typeof drawerOpen === "function" && drawerOpen()) renderDrawer();
+}
 
 const chime = () => {};
 
@@ -1685,9 +1928,9 @@ document.addEventListener("click", (e) => {
     case "pomo-start":
       pomo.running ? stopPomo() : startPomo();
       sfx("button");
-      if (currentTab === "tools" && !toolsUi.open) renderTools();
+      refreshToolsMenus();
       return;
-    case "pomo-reset": sfx("click"); return setPomoMode(pomo.mode);
+    case "pomo-reset": sfx("click"); return resetPomo();
     case "gpa-add": state.gpa.courses.push({ name: "", credits: "3", grade: "A" }); save(); return renderTools();
     case "gpa-remove": state.gpa.courses.splice(Number(el.dataset.i), 1); save(); return renderTools();
     case "gpa-import":
@@ -1704,7 +1947,7 @@ document.addEventListener("click", (e) => {
     case "export": return exportData();
     case "test-alarm": { const a = ringAlarm(0); setTimeout(() => { if (pomo.alarm === a) cancelAlarm(); }, 2200); return; }
     case "open-tool": return openTool(el.dataset.tool);
-    case "tools-back": toolsUi.open = null; sfx("click"); return renderTools();
+    case "tools-back": return toggleDrawer();
     case "track": return toggleTrack(el.dataset.track);
     case "embed": return music.embed === "playlist" ? (closeEmbed(), updateMusicUI()) : openEmbed();
     case "install-app": return installApp();
@@ -1729,6 +1972,7 @@ document.addEventListener("change", (e) => {
   if (t.dataset.pomo) {
     const v = Math.max(1, Math.min(120, parseInt(t.value) || 1));
     state.pomodoro[t.dataset.pomo] = v; save();
+    if (t.dataset.pomo !== pomo.mode) pomo.saved[t.dataset.pomo] = null;
     if (!pomo.running && pomo.mode === t.dataset.pomo) { pomo.left = v * 60; updatePomoDisplay(); }
     t.value = v;
   }
@@ -1770,7 +2014,8 @@ document.addEventListener("keydown", (e) => {
   if (e.target.closest("input, textarea, select, dialog[open], .alarm-card:not([hidden])") || e.metaKey || e.ctrlKey || e.altKey) return;
   if ($("#formDialog").open || !$("#alarmCard").hidden) return;
   const tabs = ["dashboard", "classes", "exams", "calendar", "tools"];
-  if (e.key >= "1" && e.key <= "5") showTab(tabs[Number(e.key) - 1]);
+  if (e.key === "5") toggleDrawer();
+  else if (e.key >= "1" && e.key <= "4") { closeDrawer(); showTab(tabs[Number(e.key) - 1]); }
   else if (e.key === "n") { e.preventDefault(); editAssignment(); }
   else if (e.key === "e") { e.preventDefault(); editExam(); }
 });

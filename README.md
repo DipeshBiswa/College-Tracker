@@ -11,8 +11,8 @@ Styled like apple.com in bisque & lavender, with light and dark mode. Install it
 - **Calendar**: a month view of everything that's due.
 - **Reminders**: turn on desktop notifications to get a heads-up before things are due (you choose 12 hours to 1 week ahead). The Today tab shows how many things are coming up soon.
 - **Study music**: calm sounds made right in the app (lo-fi keys, rain, ocean waves, soft pad, brown noise) that work offline, plus Café jazz from YouTube (falls back to built-in jazz when offline). Mix them together. You can also paste a YouTube or Spotify playlist link.
-- **Focus timer**: a floating mini timer follows you around the app (pause, reset or hide it while it keeps running), and a loud bell rings when time's up.
-- **Tools**: focus timer, "what do I need on the final?" calculator, GPA calculator, notes, saved links, study tips and helpful sites.
+- **Focus timer**: a glass mini timer sits at the top-left on every screen, with Focus/Break/Long, pause, reset, skip and +5 min. Tap the eye to tuck it away while it keeps running. Each mode remembers its own time, so switching never resets it. A loud bell rings when time's up.
+- **Tools** (slide-out panel on the right): focus timer, "what do I need on the final?" calculator, GPA calculator, notes, saved links, study tips and helpful sites.
 - **Sounds**: a chunky button click-clack on every button (can be turned off in Settings).
 - **Your data is saved** automatically on your device. Close it, restart your computer, open it again, and everything is still there.
 
