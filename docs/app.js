@@ -286,7 +286,7 @@ function showTab(tab) {
   render();
   try { history.replaceState(null, "", "#" + tab); } catch {}
 }
-$("#toolsBtn").addEventListener("click", () => { sfx("click"); showTab("tools"); });
+$("#toolsBtn").addEventListener("click", () => { sfx("click"); toolsUi.open = null; showTab("tools"); });
 $("#tabs").addEventListener("click", (e) => { const b = e.target.closest("button[data-tab]"); if (b) { sfx("click"); showTab(b.dataset.tab); } });
 
 /* ================= Form dialog ================= */
@@ -948,7 +948,13 @@ function openEmbed() {
 }
 function closeEmbed() { $("#musicEmbed").innerHTML = ""; $("#musicEmbed").hidden = true; music.embed = false; }
 
+function musicStatus() {
+  const names = Object.keys(music.playing).map((id) => TRACKS.find((t) => t.id === id).name);
+  if (music.embed) names.push("Your playlist");
+  return names.length ? `${music.paused ? "Paused" : "Playing"}: ${names.join(" + ")}` : "";
+}
 function updateMusicUI() {
+  const hm = $("#hubMusic"); if (hm) hm.textContent = musicStatus() || "Lo-fi, rain, waves and more";
   const ids = Object.keys(music.playing);
   const names = ids.map((id) => TRACKS.find((t) => t.id === id).name);
   if (music.embed) names.push("Your playlist");
@@ -970,145 +976,202 @@ const GRADE_POINTS = { "A+": 4.0, A: 4.0, "A-": 3.7, "B+": 3.3, B: 3.0, "B-": 2.
 
 const pomo = { mode: "focus", left: null, running: false, timer: null, count: 0 };
 
+const toolsUi = { open: null };
+
+const TOOL_LIST = [
+  { id: "timer", name: "Focus timer", glyph: "◷", tint: "#8676d9" },
+  { id: "music", name: "Study music", glyph: "♪", tint: "#d987a4" },
+  { id: "final", name: "Final grade calculator", glyph: "%", tint: "#e0a46c" },
+  { id: "gpa", name: "GPA calculator", glyph: "A", tint: "#6fb39a" },
+  { id: "notes", name: "Notes", glyph: "✎", tint: "#c9a24f" },
+  { id: "links", name: "Links & study tips", glyph: "↗", tint: "#6f9fd8" },
+];
+
+function toolSubtitle(id) {
+  if (id === "timer") return pomo.running ? `<span id="hubTimer">${pomoLabel()}</span> · ${pomo.mode === "focus" ? "focusing" : "on a break"}` : "25-minute focus sessions with breaks";
+  if (id === "music") return `<span id="hubMusic">${musicStatus() || "Lo-fi, rain, waves and more"}</span>`;
+  if (id === "final") return "What score do I need?";
+  if (id === "gpa") return state.gpa.courses.length ? `${plural(state.gpa.courses.length, "course")}` : "Semester and cumulative";
+  if (id === "notes") return state.notes ? esc(state.notes.split("\n")[0].slice(0, 48)) : "Jot things down";
+  if (id === "links") return "Your links, helpful sites, study tips";
+  return "";
+}
+
+function openTool(id) { toolsUi.open = id; sfx("click"); renderTools(); window.scrollTo({ top: 0 }); }
+
 function renderTools() {
-  const s = state.settings;
-  const p = state.pomodoro;
-  if (pomo.left == null) pomo.left = p[pomo.mode] * 60;
-  const todayCount = p.history[dateKey(new Date())] || 0;
-
-  const gpaRows = state.gpa.courses.map((c, i) => `<tr>
-    <td><input type="text" data-gpa="${i}" data-f="name" value="${esc(c.name)}" placeholder="Course"/></td>
-    <td style="width:4.8rem"><input type="number" data-gpa="${i}" data-f="credits" value="${esc(c.credits)}" min="0" step="0.5" placeholder="Cr"/></td>
-    <td style="width:5rem"><select data-gpa="${i}" data-f="grade">${Object.keys(GRADE_POINTS).map((g) => `<option ${g === c.grade ? "selected" : ""}>${g}</option>`).join("")}</select></td>
-    <td><button class="link-btn" data-action="gpa-remove" data-i="${i}" aria-label="Remove">✕</button></td></tr>`).join("");
-
-  const notifOn = "Notification" in window && Notification.permission === "granted" && s.notifications;
-
-  $("#view-tools").innerHTML = `
-    <div class="page-head"><h1>Tools</h1></div>
-    <div class="grid grid-2">
-
-      <div class="card timer">
-        <h2>Focus timer</h2>
-        <div class="mode-pills">
-          ${["focus", "short", "long"].map((m) => `<button data-action="pomo-mode" data-mode="${m}" class="${pomo.mode === m ? "active" : ""}">${{ focus: "Focus", short: "Break", long: "Long break" }[m]}</button>`).join("")}
-        </div>
-        <div class="ring">
-          <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="46" fill="none" stroke="var(--fill-2)" stroke-width="3"/>
-            <circle id="pomoRing" cx="50" cy="50" r="46" fill="none" stroke="var(--lavender)" stroke-width="3" stroke-linecap="round" stroke-dasharray="289" stroke-dashoffset="0"/></svg>
-          <div class="time" id="pomoTime">00:00</div>
-        </div>
-        <div class="row" style="justify-content:center;margin-top:.8rem">
-          <button class="btn primary" data-action="pomo-start" style="flex:none;min-width:6rem" id="pomoStart">${pomo.running ? "Pause" : "Start"}</button>
-          <button class="btn ghost" data-action="pomo-reset" style="flex:none">Reset</button>
-        </div>
-        <div class="small muted" style="margin-top:.7rem">${todayCount ? `${plural(todayCount, "session")} today` : "Short focused sessions with breaks in between."}</div>
-        <details class="mini"><summary>Adjust times</summary>
-          <div class="row small" style="margin-top:.5rem">
-            <label>Focus <input type="number" data-pomo="focus" value="${p.focus}" min="1" max="120"/></label>
-            <label>Break <input type="number" data-pomo="short" value="${p.short}" min="1" max="60"/></label>
-            <label>Long <input type="number" data-pomo="long" value="${p.long}" min="1" max="60"/></label>
-          </div>
-        </details>
+  const v = $("#view-tools");
+  if (!toolsUi.open) {
+    v.innerHTML = `
+      <div class="page-head"><h1>Tools</h1></div>
+      <div class="card list-card menu">
+        ${TOOL_LIST.map((t) => `<button class="menu-row" data-action="open-tool" data-tool="${t.id}">
+          <span class="menu-ico" style="--c:${t.tint}">${t.glyph}</span>
+          <span class="grow"><span class="menu-title">${t.name}</span><span class="menu-sub">${toolSubtitle(t.id)}</span></span>
+          <span class="chev">›</span></button>`).join("")}
       </div>
+      <div class="card list-card menu" style="margin-top:1rem">
+        <button class="menu-row" data-action="open-tool" data-tool="settings">
+          <span class="menu-ico" style="--c:#8e8e93">⚙︎</span>
+          <span class="grow"><span class="menu-title">Settings</span><span class="menu-sub">Appearance, reminders, sounds, backup</span></span>
+          <span class="chev">›</span></button>
+      </div>`;
+    return;
+  }
+  const t = TOOL_LIST.find((x) => x.id === toolsUi.open) || { name: "Settings" };
+  v.innerHTML = `
+    <button class="back-btn" data-action="tools-back">‹ Tools</button>
+    <h1 class="tool-title">${t.name}</h1>
+    <div class="tool-page">${TOOL_PAGES[toolsUi.open]()}</div>`;
+  if (toolsUi.open === "timer") updatePomoDisplay();
+  if (toolsUi.open === "final") calcFinal();
+  if (toolsUi.open === "gpa") calcGpa();
+  if (toolsUi.open === "notes") { const n = $("#quickNotes"); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }
+}
 
-      <div class="card">
-        <h2>Study music</h2>
-        <div class="tracks">${TRACKS.map((t) => `<button class="track ${music.playing[t.id] ? "on" : ""}" data-action="track" data-track="${t.id}">
-          <span class="eq"><i></i><i></i><i></i></span><span class="tname">${t.name}</span><span class="tsub">${t.sub}</span></button>`).join("")}</div>
-        <div class="setting-row" style="padding-bottom:.2rem"><span class="muted small" style="flex:none">Volume</span>
-          <input type="range" id="musicVolume" min="0" max="100" value="${state.settings.musicVolume ?? 50}"/></div>
-        <details class="mini" ${state.settings.musicUrl ? "open" : ""}><summary>Your own playlist</summary>
-          <div class="row" style="margin-top:.5rem;flex-wrap:nowrap">
-            <input type="url" id="musicUrl" value="${esc(state.settings.musicUrl || "")}" placeholder="Paste a YouTube or Spotify link"/>
-            <button class="btn small-install" id="embedBtn" data-action="embed" style="flex:none">${music.embed ? "Close player" : "Play"}</button>
-          </div>
-          <div class="small muted" style="margin-top:.35rem">Playlists need an internet connection.</div>
-        </details>
+const TOOL_PAGES = {
+  timer() {
+    const p = state.pomodoro;
+    if (pomo.left == null) pomo.left = p[pomo.mode] * 60;
+    const todayCount = p.history[dateKey(new Date())] || 0;
+    return `<div class="card timer big">
+      <div class="mode-pills">
+        ${["focus", "short", "long"].map((m) => `<button data-action="pomo-mode" data-mode="${m}" class="${pomo.mode === m ? "active" : ""}">${{ focus: "Focus", short: "Break", long: "Long break" }[m]}</button>`).join("")}
       </div>
-
-      <div class="card">
-        <h2>What do I need on the final?</h2>
-        <label class="field"><span>Current grade (%)</span><input type="number" id="fgCurrent" value="${esc(fg.cur)}" placeholder="84" step="0.1"/></label>
-        <div class="row">
-          <label class="field"><span>Final is worth (%)</span><input type="number" id="fgWeight" value="${esc(fg.w)}" placeholder="30" step="0.1"/></label>
-          <label class="field"><span>Grade I want (%)</span><input type="number" id="fgTarget" value="${esc(fg.t)}" placeholder="90" step="0.1"/></label>
+      <div class="ring">
+        <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="46" fill="none" stroke="var(--fill-2)" stroke-width="2.5"/>
+          <circle id="pomoRing" cx="50" cy="50" r="46" fill="none" stroke="var(--lavender)" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="289" stroke-dashoffset="0"/></svg>
+        <div class="time" id="pomoTime">00:00</div>
+      </div>
+      <div class="row" style="justify-content:center;margin-top:1.4rem">
+        <button class="btn primary" data-action="pomo-start" style="flex:none;min-width:7rem" id="pomoStart">${pomo.running ? "Pause" : "Start"}</button>
+        <button class="btn ghost" data-action="pomo-reset" style="flex:none">Reset</button>
+      </div>
+      <div class="small muted" style="margin-top:1rem">${todayCount ? `${plural(todayCount, "session")} today` : "Focus for a while, then take a short break."}</div>
+      <details class="mini" style="text-align:center"><summary>Adjust times</summary>
+        <div class="row small" style="margin-top:.6rem;max-width:22rem;margin-inline:auto">
+          <label>Focus <input type="number" data-pomo="focus" value="${p.focus}" min="1" max="120"/></label>
+          <label>Break <input type="number" data-pomo="short" value="${p.short}" min="1" max="60"/></label>
+          <label>Long <input type="number" data-pomo="long" value="${p.long}" min="1" max="60"/></label>
         </div>
-        <div id="fgResult"></div>
-      </div>
-
-      <div class="card">
-        <h2>GPA</h2>
-        ${gpaRows ? `<table class="gpa">${gpaRows}</table>` : `<p class="muted small" style="margin-top:0">Add your courses and grades to see your GPA.</p>`}
-        <div class="row" style="margin:.5rem 0 0">
-          <button class="text-btn" data-action="gpa-add" style="flex:none">+ Add course</button>
-          ${state.classes.length ? `<button class="text-btn muted" data-action="gpa-import" style="flex:none">Use my classes</button>` : ""}
-        </div>
-        <details class="mini"><summary>Include previous semesters</summary>
-          <div class="row small" style="margin-top:.5rem">
-            <label>Prior GPA <input type="number" id="gpaPrior" value="${esc(state.gpa.priorGpa)}" step="0.01" min="0" max="4"/></label>
-            <label>Prior credits <input type="number" id="gpaPriorCr" value="${esc(state.gpa.priorCredits)}" min="0"/></label>
-          </div>
-        </details>
-        <div id="gpaResult"></div>
-      </div>
-
-      <div class="card">
-        <h2>Notes</h2>
-        <textarea id="quickNotes" class="plain" style="min-height:190px" placeholder="Anything on your mind…">${esc(state.notes)}</textarea>
-      </div>
+      </details>
     </div>
+    <p class="small muted center">The timer keeps running while you use the rest of the app.</p>`;
+  },
 
-    <details class="later">
-      <summary>Links & study resources</summary>
-      <div class="card">
-        <div class="section-title" style="margin-top:0">My links</div>
-        <ul class="resource-list">${state.links.map((l, i) => `<li class="row" style="flex-wrap:nowrap"><a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.name)}</a><button class="link-btn" style="flex:none" data-action="link-remove" data-i="${i}" aria-label="Remove">✕</button></li>`).join("")}</ul>
-        <button class="text-btn" data-action="link-add">+ Add link</button>
-
-        <div class="section-title">Helpful sites</div>
-        <ul class="resource-list small">
-          <li><a href="https://www.khanacademy.org" target="_blank" rel="noopener">Khan Academy</a> <span class="muted">· free lessons</span></li>
-          <li><a href="https://www.desmos.com/calculator" target="_blank" rel="noopener">Desmos</a> <span class="muted">· graphing calculator</span></li>
-          <li><a href="https://owl.purdue.edu" target="_blank" rel="noopener">Purdue OWL</a> <span class="muted">· writing & citations</span></li>
-          <li><a href="https://www.zotero.org" target="_blank" rel="noopener">Zotero</a> <span class="muted">· citation manager</span></li>
-          <li><a href="https://apps.ankiweb.net" target="_blank" rel="noopener">Anki</a> <span class="muted">· flashcards</span></li>
-          <li><a href="https://openstax.org" target="_blank" rel="noopener">OpenStax</a> <span class="muted">· free textbooks</span></li>
-          <li><a href="https://scholar.google.com" target="_blank" rel="noopener">Google Scholar</a> <span class="muted">· research papers</span></li>
-        </ul>
-
-        <div class="section-title">Study tips</div>
-        <ul class="tips small">
-          <li>Test yourself instead of rereading — recall is what makes it stick.</li>
-          <li>Review in short sessions spread over days, not one long cram.</li>
-          <li>Explain it simply, as if to a friend. The gaps show what to study.</li>
-          <li>Sleep before an exam beats an all-nighter.</li>
-          <li>Go to office hours early in the semester.</li>
-        </ul>
+  music() {
+    return `<div class="card">
+      <div class="tracks">${TRACKS.map((t) => `<button class="track ${music.playing[t.id] ? "on" : ""}" data-action="track" data-track="${t.id}">
+        <span class="eq"><i></i><i></i><i></i></span><span class="tname">${t.name}</span><span class="tsub">${t.sub}</span></button>`).join("")}</div>
+      <div class="setting-row" style="margin-top:.4rem"><span class="lbl muted" style="flex:none">Volume</span>
+        <input type="range" id="musicVolume" min="0" max="100" value="${state.settings.musicVolume ?? 50}" style="max-width:260px"/></div>
+    </div>
+    <div class="section-title">Your own playlist</div>
+    <div class="card">
+      <div class="row" style="flex-wrap:nowrap">
+        <input type="url" id="musicUrl" value="${esc(state.settings.musicUrl || "")}" placeholder="Paste a YouTube or Spotify link"/>
+        <button class="btn primary" id="embedBtn" data-action="embed" style="flex:none">${music.embed ? "Close player" : "Play"}</button>
       </div>
-    </details>
+      <div class="small muted" style="margin-top:.5rem">Playlists need an internet connection.</div>
+    </div>
+    <p class="small muted center">Tap a sound to start it; you can mix a few. Music keeps playing while you use the rest of the app.</p>`;
+  },
 
-    <div class="section-title">Settings</div>
-    <div class="card settings">
+  final() {
+    return `<div class="card">
+      <label class="field"><span>Current grade in the class (%)</span><input type="number" id="fgCurrent" value="${esc(fg.cur)}" placeholder="84" step="0.1"/></label>
+      <div class="row">
+        <label class="field"><span>Final exam is worth (%)</span><input type="number" id="fgWeight" value="${esc(fg.w)}" placeholder="30" step="0.1"/></label>
+        <label class="field"><span>Grade I want (%)</span><input type="number" id="fgTarget" value="${esc(fg.t)}" placeholder="90" step="0.1"/></label>
+      </div>
+      <div id="fgResult"></div>
+    </div>`;
+  },
+
+  gpa() {
+    const rows = state.gpa.courses.map((c, i) => `<tr>
+      <td><input type="text" data-gpa="${i}" data-f="name" value="${esc(c.name)}" placeholder="Course"/></td>
+      <td style="width:5.5rem"><input type="number" data-gpa="${i}" data-f="credits" value="${esc(c.credits)}" min="0" step="0.5" placeholder="Credits"/></td>
+      <td style="width:5.5rem"><select data-gpa="${i}" data-f="grade">${Object.keys(GRADE_POINTS).map((g) => `<option ${g === c.grade ? "selected" : ""}>${g}</option>`).join("")}</select></td>
+      <td><button class="link-btn" data-action="gpa-remove" data-i="${i}" aria-label="Remove">✕</button></td></tr>`).join("");
+    return `<div class="card">
+      ${rows ? `<table class="gpa"><tr class="gpa-head"><td>Course</td><td>Credits</td><td>Grade</td><td></td></tr>${rows}</table>` : `<p class="muted" style="margin-top:0">Add your courses and grades to see your GPA.</p>`}
+      <div class="row" style="margin:.6rem 0 0">
+        <button class="text-btn" data-action="gpa-add" style="flex:none">+ Add course</button>
+        ${state.classes.length ? `<button class="text-btn muted" data-action="gpa-import" style="flex:none">Use my classes</button>` : ""}
+      </div>
+      <div id="gpaResult"></div>
+    </div>
+    <div class="section-title">Previous semesters (optional)</div>
+    <div class="card">
+      <div class="row">
+        <label class="field" style="margin:0"><span>GPA so far</span><input type="number" id="gpaPrior" value="${esc(state.gpa.priorGpa)}" step="0.01" min="0" max="4" placeholder="3.5"/></label>
+        <label class="field" style="margin:0"><span>Credits so far</span><input type="number" id="gpaPriorCr" value="${esc(state.gpa.priorCredits)}" min="0" placeholder="30"/></label>
+      </div>
+    </div>`;
+  },
+
+  notes() {
+    return `<div class="card notes-card"><textarea id="quickNotes" class="plain" placeholder="Anything on your mind…">${esc(state.notes)}</textarea></div>
+      <p class="small muted center">Saves automatically.</p>`;
+  },
+
+  links() {
+    return `<div class="section-title" style="margin-top:0">My links</div>
+    <div class="card">
+      <ul class="resource-list">${state.links.map((l, i) => `<li class="row" style="flex-wrap:nowrap"><a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.name)}</a><button class="link-btn" style="flex:none" data-action="link-remove" data-i="${i}" aria-label="Remove">✕</button></li>`).join("") || `<li class="muted small">Save your school portal, Canvas, email, library…</li>`}</ul>
+      <button class="text-btn" data-action="link-add">+ Add link</button>
+    </div>
+    <div class="section-title">Helpful sites</div>
+    <div class="card">
+      <ul class="resource-list">
+        <li><a href="https://www.khanacademy.org" target="_blank" rel="noopener">Khan Academy</a> <span class="muted">· free lessons</span></li>
+        <li><a href="https://www.desmos.com/calculator" target="_blank" rel="noopener">Desmos</a> <span class="muted">· graphing calculator</span></li>
+        <li><a href="https://owl.purdue.edu" target="_blank" rel="noopener">Purdue OWL</a> <span class="muted">· writing & citations</span></li>
+        <li><a href="https://www.zotero.org" target="_blank" rel="noopener">Zotero</a> <span class="muted">· citation manager</span></li>
+        <li><a href="https://apps.ankiweb.net" target="_blank" rel="noopener">Anki</a> <span class="muted">· flashcards</span></li>
+        <li><a href="https://openstax.org" target="_blank" rel="noopener">OpenStax</a> <span class="muted">· free textbooks</span></li>
+        <li><a href="https://scholar.google.com" target="_blank" rel="noopener">Google Scholar</a> <span class="muted">· research papers</span></li>
+      </ul>
+    </div>
+    <div class="section-title">Study tips</div>
+    <div class="card">
+      <ul class="tips">
+        <li>Test yourself instead of rereading. Recall is what makes it stick.</li>
+        <li>Review in short sessions spread over days, not one long cram.</li>
+        <li>Explain it simply, as if to a friend. The gaps show what to study.</li>
+        <li>Sleep before an exam beats an all-nighter.</li>
+        <li>Go to office hours early in the semester.</li>
+      </ul>
+    </div>`;
+  },
+
+  settings() {
+    const s = state.settings;
+    const notifOn = "Notification" in window && Notification.permission === "granted" && s.notifications;
+    return `<div class="card settings">
       <div class="setting-row"><span class="lbl">Appearance</span>
         <select id="setTheme" class="compact">${[["auto", "Automatic"], ["light", "Light"], ["dark", "Dark"]].map(([v, l]) => `<option value="${v}" ${s.theme === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
       <div class="setting-row"><span class="lbl">Remind me</span>
         <select id="setAlert" class="compact">${[[12, "12 hours before"], [24, "1 day before"], [48, "2 days before"], [72, "3 days before"], [168, "1 week before"]].map(([h, l]) => `<option value="${h}" ${s.alertHours === h ? "selected" : ""}>${l}</option>`).join("")}</select></div>
-      <div class="setting-row"><span class="lbl">Desktop notifications</span>
+      <div class="setting-row"><span class="lbl">Desktop notifications ${s.notifications ? `<button class="text-btn" data-action="test-notif">Test</button>` : ""}</span>
         <label class="switch"><input type="checkbox" id="setNotifs" ${notifOn ? "checked" : ""}/><span></span></label></div>
+    </div>
+    <div class="section-title">Sounds</div>
+    <div class="card settings">
       <div class="setting-row"><span class="lbl">Click sounds</span>
         <label class="switch"><input type="checkbox" id="setSounds" ${s.sounds === false ? "" : "checked"}/><span></span></label></div>
-      ${s.sounds === false ? "" : `<div class="setting-row"><span class="lbl muted">Click volume</span><input type="range" id="setVolume" min="0" max="100" value="${s.volume ?? 60}" style="max-width:180px"/></div>`}
+      ${s.sounds === false ? "" : `<div class="setting-row"><span class="lbl muted">Click volume</span><input type="range" id="setVolume" min="0" max="100" value="${s.volume ?? 60}" style="max-width:200px"/></div>`}
+    </div>
+    <div class="section-title">Your data</div>
+    <div class="card settings">
       ${isInstalled() ? "" : `<div class="setting-row"><span class="lbl">Install as an app</span><button class="text-btn" data-action="install-app">${installPrompt ? "Install" : "How?"}</button></div>`}
       <div class="setting-row"><span class="lbl">Backup</span>
         <span class="row" style="flex:none;gap:.4rem"><button class="text-btn" data-action="export">Export</button><label class="text-btn">Import<input type="file" id="importFile" accept=".json,application/json" hidden/></label></span></div>
     </div>
     <p class="small muted center">${storageMode === "server" ? "Saving to data/tracker.json on this computer." : "Your data is saved on this device. Export a backup now and then to keep a copy."}</p>`;
-
-  updatePomoDisplay();
-  calcFinal();
-  calcGpa();
-}
+  },
+};
 
 const fg = { cur: "", w: "", t: "" };
 function calcFinal() {
@@ -1142,7 +1205,9 @@ function calcGpa() {
 }
 
 /* ---- Pomodoro ---- */
+const pomoLabel = () => `${pad(Math.floor(pomo.left / 60))}:${pad(pomo.left % 60)}`;
 function updatePomoDisplay() {
+  const hub = $("#hubTimer"); if (hub) hub.textContent = pomoLabel();
   const el = $("#pomoTime");
   const total = state.pomodoro[pomo.mode] * 60;
   if (pomo.left == null) pomo.left = total;
@@ -1283,6 +1348,7 @@ document.addEventListener("click", (e) => {
       if (pomo.running) stopPomo();
       else { pomo.running = true; pomo.timer = setInterval(pomoTick, 1000); }
       sfx("button");
+      if (currentTab === "tools" && !toolsUi.open) renderTools();
       return updatePomoDisplay();
     case "pomo-reset": return setPomoMode(pomo.mode, false);
     case "gpa-add": state.gpa.courses.push({ name: "", credits: "3", grade: "A" }); save(); return renderTools();
@@ -1299,6 +1365,8 @@ document.addEventListener("click", (e) => {
       });
     case "link-remove": state.links.splice(Number(el.dataset.i), 1); save(); return renderTools();
     case "export": return exportData();
+    case "open-tool": return openTool(el.dataset.tool);
+    case "tools-back": toolsUi.open = null; sfx("click"); return renderTools();
     case "track": return toggleTrack(el.dataset.track);
     case "embed": return music.embed ? (closeEmbed(), updateMusicUI()) : openEmbed();
     case "install-app": return installApp();

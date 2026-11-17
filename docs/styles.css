@@ -51,6 +51,7 @@
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+[hidden] { display: none !important; }
 html, body { margin: 0; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "Inter", "Segoe UI", system-ui, sans-serif;
@@ -314,6 +315,37 @@ table.gpa td:last-child { width: 2rem; }
 .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .7rem 0; min-height: 3rem; }
 .setting-row + .setting-row { border-top: 1px solid var(--separator); }
 .setting-row .lbl { font-weight: 500; }
+
+/* ---------- Tools menu & tool pages ---------- */
+.menu { padding: .2rem 0; overflow: hidden; }
+.menu-row {
+  display: flex; align-items: center; gap: .9rem; width: 100%; border: 0; background: none; text-align: left;
+  padding: .75rem 1.1rem; cursor: pointer; position: relative; transition: background .15s;
+}
+.menu-row:hover { background: var(--fill-2); }
+.menu-row:active { background: var(--fill); }
+.menu-row + .menu-row::before { content: ""; position: absolute; top: 0; left: 3.9rem; right: 0; border-top: 1px solid var(--separator); }
+.menu-ico {
+  width: 2rem; height: 2rem; border-radius: 9px; flex: none; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--c) 18%, transparent); color: color-mix(in srgb, var(--c) 80%, var(--text));
+  font-weight: 700; font-size: .95rem;
+}
+.menu-title { display: block; font-weight: 500; }
+.menu-sub { display: block; font-size: .82rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.chev { color: var(--muted); font-size: 1.3rem; line-height: 1; opacity: .6; }
+.back-btn {
+  border: 0; background: none; color: var(--lavender-strong); font-weight: 500; font-size: .95rem; cursor: pointer;
+  padding: .3rem .5rem; margin: 0 0 .4rem -.5rem; border-radius: 8px;
+}
+.back-btn:hover { background: var(--lavender-soft); }
+.tool-title { margin-bottom: 1.3rem; }
+.tool-page { animation: fade .3s ease; }
+.timer.big { padding: 2rem 1.2rem 1.5rem; }
+.timer.big .ring { width: 250px; height: 250px; }
+.timer.big .time { font-size: 3.6rem; }
+.notes-card { padding: 1.2rem 1.3rem; }
+.notes-card textarea { min-height: 55vh; font-size: 1rem; }
+.gpa-head td { font-size: .78rem; color: var(--muted); font-weight: 500; padding-bottom: .1rem; }
 
 /* ---------- Study music ---------- */
 .tracks { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; margin-bottom: .4rem; }
