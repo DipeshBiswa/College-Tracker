@@ -1,7 +1,7 @@
 # 🎓 College Tracker
 
 A calm, local-first tracker for college: classes → assignments, exams, deadline reminders, and handy student tools.
-A calm, simple design with apple.com-inspired colors, in **light and dark mode**.
+A calm, simple design in the style of apple.com, using bisque & lavender, in **light and dark mode**.
 
 ## Features
 

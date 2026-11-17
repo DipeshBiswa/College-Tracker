@@ -80,8 +80,8 @@ const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const DAY = 86400000;
 const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-// Apple system colors
-const COLORS = ["#0071e3", "#34c759", "#ff9f0a", "#ff375f", "#af52de", "#5ac8fa", "#ffcc00", "#8e8e93"];
+// Soft class colors that sit well with bisque & lavender
+const COLORS = ["#8676d9", "#e0a46c", "#6fb39a", "#d987a4", "#6f9fd8", "#c9a24f", "#a586d9", "#df8573"];
 
 const pad = (n) => String(n).padStart(2, "0");
 const toLocalInput = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -131,7 +131,7 @@ function urgency(s, done) {
 }
 
 const classById = (id) => state.classes.find((c) => c.id === id);
-const classColor = (id) => classById(id)?.color || "#0071e3";
+const classColor = (id) => classById(id)?.color || "#8676d9";
 const className = (id) => { const c = classById(id); return c ? (c.code || c.name) : "No class"; };
 const byDue = (a, b) => (a.due || "9999").localeCompare(b.due || "9999");
 const byDate = (a, b) => (a.date || "9999").localeCompare(b.date || "9999");
