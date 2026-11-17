@@ -1,44 +1,41 @@
-# 🎓 College Tracker
+# College Tracker
 
-A calm, local-first tracker for college: classes → assignments, exams, deadline reminders, and handy student tools.
-A calm, simple design in the style of apple.com, using bisque & lavender, in **light and dark mode**.
+A calm, simple tracker for college: classes and their assignments, exams, and gentle reminders.
+Styled like apple.com in bisque & lavender, with light and dark mode. Runs on your own computer, with no account and no internet needed.
 
 ## Features
 
-- **Classes** — name, code, credits, instructor, room, meeting days/times, office hours, color.
-  Each class card holds its own **assignments** (due date, priority, type, notes/links) with a progress bar.
-- **Exams** — date, location, topics, weight, score afterwards, "I'm ready" flag, day countdowns and study nudges.
-- **Dashboard** — overdue / this week / upcoming exams at a glance, today's class schedule, grouped "coming up" list.
-- **Reminders** — 🔔 bell shows everything due within your alert window (12h → 1 week).
-  Turn on **desktop notifications** to get a pop-up when something enters the window, at under 2 hours, and when it's overdue.
-- **Calendar** — month view of all assignments and exams, click a day for details.
-- **Sound effects** — soft synthesized chimes for completing, adding, deleting, reminders and the focus timer (toggle + volume in Settings).
-- **Student tools** — Pomodoro focus timer (tracks sessions), "what do I need on the final?" calculator,
-  GPA calculator (semester + cumulative), quick notes, saved links, study tips, free resources.
-- **Your data is saved** to `data/tracker.json` automatically (plus daily backups in `data/backups/`, last 14 kept).
-  Close it, reboot, reopen — it's all still there. Export/import a backup from *Student Tools → Settings*.
+- **Today**: a short summary of your week, one list of what's due (assignments and exams together), and today's classes.
+- **Classes**: each class holds its own assignments. Tick them off with a round checkmark; click one to edit it.
+- **Exams**: a countdown to each exam, plus where it is and what's on it.
+- **Calendar**: a month view of everything that's due.
+- **Reminders**: turn on desktop notifications to get a heads-up before things are due (you choose 12 hours to 1 week ahead). The Today tab shows how many things are coming up soon.
+- **Tools**: focus timer, "what do I need on the final?" calculator, GPA calculator, notes, saved links, study tips and helpful sites.
+- **Sounds**: soft chimes when you add or finish things (can be turned off in Settings).
+- **Your data is saved** to `data/tracker.json` automatically, with a daily backup in `data/backups/` (last 14 kept).
+  Close it, restart your computer, open it again, and everything is still there. You can also export or import a backup in **Tools → Settings**.
 
 ## Run it
 
-Needs [Node.js](https://nodejs.org) 18 or newer. No `npm install` — there are zero dependencies.
+You need [Node.js](https://nodejs.org) 18 or newer. There is nothing else to install.
 
 ```bash
-git clone https://github.com/<you>/college-tracker.git
+git clone https://github.com/DipeshBiswa/college-tracker.git
 cd college-tracker
 npm start
 ```
 
-It opens **http://localhost:5173** in your browser. Or double-click `start.sh` (Mac/Linux) / `start.bat` (Windows).
+It opens **http://localhost:5173** in your browser. You can also double-click `start.sh` (Mac/Linux) or `start.bat` (Windows).
 
-- Different port: `PORT=5174 npm start`
-- Don't auto-open the browser: `npm run dev`
-- Keep data somewhere else (e.g. a Dropbox/iCloud folder to sync between laptops):
+- Use a different port: `PORT=5174 npm start`
+- Don't open the browser automatically: `npm run dev`
+- Keep your data somewhere else (for example a Dropbox or iCloud folder, to sync between laptops):
   `TRACKER_DATA_DIR="$HOME/Dropbox/college-tracker" npm start`
 
 ### Keyboard shortcuts
-`n` new assignment · `e` new exam · `1`–`4` switch tabs, `5` tools
+`n` new assignment · `e` new exam · `1`–`4` switch tabs · `5` tools
 
 ## Privacy
 
-The server only listens on `127.0.0.1`, so nothing is reachable from other devices.
-`data/` is in `.gitignore`, so your personal assignments are **not** pushed to GitHub.
+The app only runs on your own computer (`127.0.0.1`), so other devices can't reach it.
+The `data/` folder is in `.gitignore`, so your assignments are **not** uploaded to GitHub.
