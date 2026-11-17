@@ -416,7 +416,7 @@ function assignmentRow(a, { showClass = true } = {}) {
     : u === "soon" ? `<span class="chip soon">${esc(relative(a.due))}</span>`
     : u === "done" ? `<span class="chip low">done</span>` : `<span>${esc(relative(a.due))}</span>`;
   return `<li class="item ${a.done ? "done" : ""}">
-    <input type="checkbox" class="check" data-action="toggle" data-id="${a.id}" ${a.done ? "checked" : ""} title="Mark done"/>
+    <input type="checkbox" class="check" style="--c:${esc(classColor(a.classId))}" data-action="toggle" data-id="${a.id}" ${a.done ? "checked" : ""} title="Mark done"/>
     <div class="body">
       <div class="title">${esc(a.title)}</div>
       <div class="meta">
@@ -513,21 +513,21 @@ function renderDashboard() {
     </div>
     ${notifBanner}
     <div class="stats">
-      <div class="card stat danger"><div class="num">${overdue.length}</div><div class="label">Overdue</div></div>
-      <div class="card stat warn"><div class="num">${week.length}</div><div class="label">Due in next 7 days</div></div>
-      <div class="card stat lav"><div class="num">${examsSoon.length}</div><div class="label">Exams in next 2 weeks</div></div>
-      <div class="card stat ok"><div class="num">${doneWeek.length}</div><div class="label">Finished this week</div></div>
+      <div class="card stat danger"><span class="ico">!</span><div class="num">${overdue.length}</div><div class="label">Overdue</div></div>
+      <div class="card stat warn"><span class="ico">◷</span><div class="num">${week.length}</div><div class="label">Next 7 days</div></div>
+      <div class="card stat lav"><span class="ico">✎</span><div class="num">${examsSoon.length}</div><div class="label">Exams in 2 weeks</div></div>
+      <div class="card stat ok"><span class="ico">✓</span><div class="num">${doneWeek.length}</div><div class="label">Done this week</div></div>
     </div>
     <div class="grid grid-2">
       <div class="card">
-        <h2>📌 Coming up</h2>
+        <h2>Coming up</h2>
         ${groupHtml || (state.classes.length
           ? `<div class="empty"><div class="big">🌿</div>Nothing due in the next 3 weeks. Enjoy the calm.</div>`
           : `<div class="empty"><div class="big">📚</div>Start by adding your classes.<br><br><button class="btn primary" data-action="add-class">+ Add your first class</button></div>`)}
       </div>
       <div class="grid" style="align-content:start">
         <div class="card today-classes">
-          <h2>🗓️ Today's classes</h2>
+          <h2>Today's classes</h2>
           ${todays.length ? todays.map((c) => {
             const live = c.start && c.end && nowT >= c.start && nowT <= c.end;
             const past = c.end && nowT > c.end;
@@ -536,7 +536,7 @@ function renderDashboard() {
           }).join("") : `<div class="muted">No classes scheduled today${state.classes.length ? "" : " — add meeting days to your classes to see them here"}.</div>`}
         </div>
         <div class="card">
-          <h2>📝 Next exams</h2>
+          <h2>Next exams</h2>
           ${nextExams.length ? `<ul class="items">${nextExams.map(examRow).join("")}</ul>` : `<div class="muted">No upcoming exams. <a href="#" data-action="add-exam">Add one</a></div>`}
         </div>
       </div>
@@ -564,17 +564,18 @@ function renderClasses() {
     const exams = state.exams.filter((e) => e.classId === c.id && parse(e.date) >= Date.now()).sort(byDate);
     return `<div class="card class-card" style="--c:${esc(c.color)}">
       <div class="class-head">
-        <div><h2>${esc(c.name)}</h2>
+        <div class="class-title"><span class="list-icon">${esc(initials(c))}</span>
+          <div style="min-width:0"><h2>${esc(c.name)}</h2>
           <div class="class-sub">${esc([c.code, c.credits ? c.credits + " cr" : "", c.instructor, c.location, sched].filter(Boolean).join(" · "))}</div>
-          ${c.officeHours ? `<div class="class-sub" style="margin-top:-.4rem">🕑 ${esc(c.officeHours)}</div>` : ""}
-        </div>
+          ${c.officeHours ? `<div class="class-sub">Office hours: ${esc(c.officeHours)}</div>` : ""}
+        </div></div>
         <div class="actions" style="display:flex">
           <button class="link-btn" data-action="edit-class" data-id="${c.id}" title="Edit class">✎</button>
           <button class="link-btn" data-action="delete-class" data-id="${c.id}" title="Delete class">✕</button>
         </div>
       </div>
       <div class="progress"><div style="width:${pct}%"></div></div>
-      <div class="small muted" style="margin-top:-.5rem;margin-bottom:.4rem">${done}/${list.length} assignments done${exams.length ? ` · next exam: <b>${esc(exams[0].title)}</b> ${esc(relative(exams[0].date))}` : ""}</div>
+      <div class="small muted" style="margin-bottom:.3rem">${done}/${list.length} assignments done${exams.length ? ` · next exam: <b>${esc(exams[0].title)}</b> ${esc(relative(exams[0].date))}` : ""}</div>
       ${visible.length ? `<ul class="items">${visible.map((a) => assignmentRow(a, { showClass: false })).join("")}</ul>`
         : `<div class="muted small" style="padding:.5rem 0">${list.length ? "All caught up 🎉" : "No assignments yet."}</div>`}
       <div class="class-foot">
@@ -589,6 +590,12 @@ function renderClasses() {
       <button class="btn primary" data-action="add-class">+ Add class</button></div>
     ${state.classes.length ? `<div class="grid grid-2">${cards}</div>`
       : `<div class="card empty"><div class="big">📚</div>No classes yet. Add one to start tracking assignments.<br><br><button class="btn primary" data-action="add-class">+ Add class</button></div>`}`;
+}
+
+function initials(c) {
+  const src = (c.code || c.name || "?").replace(/[^A-Za-z0-9 ]/g, " ").trim().split(/\s+/);
+  if (c.code && src.length >= 2 && /\d/.test(src[1])) return src[0].slice(0, 3).toUpperCase();
+  return src.slice(0, 2).map((w) => w[0]).join("").toUpperCase();
 }
 
 /* ================= Exams ================= */
@@ -710,7 +717,7 @@ function renderTools() {
     <div class="grid grid-3">
 
       <div class="card timer">
-        <h2>🍅 Focus timer</h2>
+        <h2>Focus timer</h2>
         <div class="mode-pills">
           ${["focus", "short", "long"].map((m) => `<button data-action="pomo-mode" data-mode="${m}" class="${pomo.mode === m ? "active" : ""}">${{ focus: "Focus", short: "Short break", long: "Long break" }[m]}</button>`).join("")}
         </div>
@@ -732,7 +739,7 @@ function renderTools() {
       </div>
 
       <div class="card">
-        <h2>🎯 What do I need on the final?</h2>
+        <h2>What do I need on the final?</h2>
         <label class="field"><span>Current grade in class (%)</span><input type="number" id="fgCurrent" value="${esc(fg.cur)}" placeholder="84" step="0.1"/></label>
         <label class="field"><span>Final exam is worth (% of grade)</span><input type="number" id="fgWeight" value="${esc(fg.w)}" placeholder="30" step="0.1"/></label>
         <label class="field"><span>Grade I want (%)</span><input type="number" id="fgTarget" value="${esc(fg.t)}" placeholder="90" step="0.1"/></label>
@@ -740,7 +747,7 @@ function renderTools() {
       </div>
 
       <div class="card">
-        <h2>📊 GPA calculator</h2>
+        <h2>GPA calculator</h2>
         <table class="gpa">${gpaRows || `<tr><td class="muted small">Add this semester's courses.</td></tr>`}</table>
         <div class="row" style="margin:.5rem 0">
           <button class="btn small" data-action="gpa-add" style="flex:none">+ Course</button>
@@ -754,19 +761,19 @@ function renderTools() {
       </div>
 
       <div class="card">
-        <h2>🗒️ Quick notes</h2>
+        <h2>Quick notes</h2>
         <textarea id="quickNotes" style="min-height:200px" placeholder="Things to ask the professor, books to buy, ideas…">${esc(state.notes)}</textarea>
         <div class="small muted">Saves automatically.</div>
       </div>
 
       <div class="card">
-        <h2>🔗 My links</h2>
+        <h2>My links</h2>
         <ul class="resource-list">${state.links.map((l, i) => `<li class="row" style="flex-wrap:nowrap"><a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.name)}</a><button class="link-btn" style="flex:none" data-action="link-remove" data-i="${i}">✕</button></li>`).join("") || `<li class="muted small">Save your school portal, Canvas/Blackboard, email, library…</li>`}</ul>
         <button class="btn small" data-action="link-add" style="margin-top:.6rem">+ Add link</button>
       </div>
 
       <div class="card">
-        <h2>💡 Study tips that work</h2>
+        <h2>Study tips that work</h2>
         <ul class="tips small">
           <li><b>Active recall:</b> close the notes and try to write/explain it from memory — then check.</li>
           <li><b>Spaced repetition:</b> review after 1 day, 3 days, a week. Short and often beats one long session.</li>
@@ -780,7 +787,7 @@ function renderTools() {
       </div>
 
       <div class="card">
-        <h2>📚 Handy resources</h2>
+        <h2>Handy resources</h2>
         <ul class="resource-list small">
           <li><a href="https://www.khanacademy.org" target="_blank" rel="noopener">Khan Academy</a> — free lessons for math, science, econ</li>
           <li><a href="https://www.desmos.com/calculator" target="_blank" rel="noopener">Desmos</a> — graphing calculator</li>
@@ -796,21 +803,16 @@ function renderTools() {
       </div>
 
       <div class="card">
-        <h2>⚙️ Settings & backup</h2>
+        <h2>Settings & backup</h2>
         <label class="field"><span>Warn me about things due within</span>
           <select id="setAlert">${[12, 24, 48, 72, 168].map((h) => `<option value="${h}" ${s.alertHours === h ? "selected" : ""}>${h < 168 ? h + " hours" : "1 week"}</option>`).join("")}</select></label>
         <label class="field"><span>Theme</span>
           <select id="setTheme">${[["auto", "Match my system"], ["light", "Light · bisque"], ["dark", "Dark · lavender night"]].map(([v, l]) => `<option value="${v}" ${s.theme === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
-        <div class="row" style="margin-bottom:.6rem">
-          <button class="btn small" data-action="enable-notifs" style="flex:none">${"Notification" in window && Notification.permission === "granted" && s.notifications ? "🔔 Reminders on" : "Turn on desktop reminders"}</button>
-          ${s.notifications ? `<button class="btn small ghost" data-action="test-notif" style="flex:none">Test</button>` : ""}
-        </div>
-        <label class="field"><span>Sound effects</span>
-          <div class="row" style="flex-wrap:nowrap">
-            <button class="btn small" data-action="toggle-sounds" style="flex:none">${s.sounds === false ? "🔇 Off" : "🔊 On"}</button>
-            <input type="range" id="setVolume" min="0" max="100" value="${s.volume ?? 60}" ${s.sounds === false ? "disabled" : ""} style="accent-color:var(--lavender)"/>
-            <button class="btn small ghost" data-action="preview-sound" style="flex:none">▶ Try</button>
-          </div></label>
+        <div class="setting-row"><span class="lbl">Desktop reminders ${s.notifications ? `<button class="link-btn small" data-action="test-notif">Test</button>` : ""}</span>
+          <label class="switch"><input type="checkbox" id="setNotifs" ${"Notification" in window && Notification.permission === "granted" && s.notifications ? "checked" : ""}/><span></span></label></div>
+        <div class="setting-row"><span class="lbl">Sound effects <button class="link-btn small" data-action="preview-sound">Try</button></span>
+          <label class="switch"><input type="checkbox" id="setSounds" ${s.sounds === false ? "" : "checked"}/><span></span></label></div>
+        <div class="setting-row"><span class="muted small" style="flex:none">🔈</span><input type="range" id="setVolume" min="0" max="100" value="${s.volume ?? 60}" ${s.sounds === false ? "disabled" : ""}/><span class="muted small" style="flex:none">🔊</span></div>
         <div class="row">
           <button class="btn small" data-action="export" style="flex:none">⬇ Export backup</button>
           <label class="btn small" style="flex:none">⬆ Import<input type="file" id="importFile" accept=".json,application/json" hidden/></label>
@@ -955,7 +957,7 @@ function checkAlerts() {
 
 function renderDrawer() {
   const items = alertItems();
-  $("#alertDrawer").innerHTML = `<h3>🔔 Within the next ${state.settings.alertHours < 168 ? state.settings.alertHours + " hours" : "week"}</h3>
+  $("#alertDrawer").innerHTML = `<h3>Within the next ${state.settings.alertHours < 168 ? state.settings.alertHours + " hours" : "week"}</h3>
     ${items.length ? `<ul class="items">${items.map((i) => (i.kind === "a" ? assignmentRow(i.ref) : examRow(i.ref))).join("")}</ul>`
       : `<div class="muted">You're all clear. 🌿</div>`}`;
 }
@@ -1056,6 +1058,8 @@ document.addEventListener("change", (e) => {
     state.pomodoro[t.dataset.pomo] = v; save();
     if (!pomo.running && pomo.mode === t.dataset.pomo) { pomo.left = v * 60; updatePomoDisplay(); }
   }
+  if (t.id === "setSounds") { state.settings.sounds = t.checked; save(); if (t.checked) sfx("complete"); $("#setVolume").disabled = !t.checked; }
+  if (t.id === "setNotifs") { if (t.checked) enableNotifications(); else { state.settings.notifications = false; save(); renderTools(); } }
   if (t.id === "setVolume") { state.settings.volume = Number(t.value); save(); sfx("complete"); }
   if (t.id === "setAlert") { state.settings.alertHours = Number(t.value); save(); checkAlerts(); }
   if (t.id === "setTheme") { state.settings.theme = t.value; save(); applyTheme(); }

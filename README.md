@@ -1,7 +1,7 @@
 # 🎓 College Tracker
 
 A calm, local-first tracker for college: classes → assignments, exams, deadline reminders, and handy student tools.
-Bisque & lavender theme with **light and dark mode**. Runs on your own computer, no account, no internet needed.
+Apple-inspired design (frosted toolbar, segmented tabs, Reminders-style lists, iOS switches) in bisque & lavender, with **light and dark mode**. Runs on your own computer, no account, no internet needed.
 
 ## Features
 
