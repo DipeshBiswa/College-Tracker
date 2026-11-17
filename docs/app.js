@@ -564,6 +564,13 @@ const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
 /* ================= Today ================= */
 
+// Remember which collapsible sections are open so the once-a-minute refresh doesn't close them.
+const openSections = new Set();
+document.addEventListener("toggle", (e) => {
+  const d = e.target;
+  if (d.tagName === "DETAILS" && d.dataset.key) d.open ? openSections.add(d.dataset.key) : openSections.delete(d.dataset.key);
+}, true);
+
 function renderDashboard() {
   const now = new Date();
   const hr = now.getHours();
@@ -604,7 +611,7 @@ function renderDashboard() {
 
     ${soon.length ? `<div class="section-title">This week</div><div class="card list-card"><ul class="items">${soon.map(itemRow).join("")}</ul></div>` : ""}
 
-    ${later.length ? `<details class="later"><summary>Later <span class="count">${later.length}</span></summary><div class="card list-card"><ul class="items">${later.map(itemRow).join("")}</ul></div></details>` : ""}
+    ${later.length ? `<details class="later" data-key="later" ${openSections.has("later") ? "open" : ""}><summary>Later <span class="count">${later.length}</span></summary><div class="card list-card"><ul class="items">${later.map(itemRow).join("")}</ul></div></details>` : ""}
 
     ${todays.length ? `<div class="section-title">Classes today</div><div class="card list-card"><ul class="items">${todays.map((c) => {
       const past = c.end && nowT > c.end;
@@ -666,7 +673,7 @@ function renderExams() {
     <div class="page-head"><h1>Exams</h1><button class="btn primary" data-action="add-exam">Add exam</button></div>
     ${upcoming.length ? `<div class="card list-card"><ul class="items">${upcoming.map(examRow).join("")}</ul></div>`
       : `<div class="card empty">No upcoming exams.</div>`}
-    ${past.length ? `<details class="later"><summary>Past exams <span class="count">${past.length}</span></summary><div class="card list-card"><ul class="items">${past.map(examRow).join("")}</ul></div></details>` : ""}`;
+    ${past.length ? `<details class="later" data-key="past-exams" ${openSections.has("past-exams") ? "open" : ""}><summary>Past exams <span class="count">${past.length}</span></summary><div class="card list-card"><ul class="items">${past.map(examRow).join("")}</ul></div></details>` : ""}`;
 }
 
 /* ================= Calendar ================= */
@@ -735,7 +742,10 @@ function musicCtx() {
     music.ctx = new (window.AudioContext || window.webkitAudioContext)();
     music.master = music.ctx.createGain();
     music.master.gain.value = musicVol();
-    music.master.connect(music.ctx.destination);
+    const limiter = music.ctx.createDynamicsCompressor();          // prevents clipping/distortion when sounds overlap
+    limiter.threshold.value = -10; limiter.knee.value = 6; limiter.ratio.value = 8;
+    limiter.attack.value = 0.005; limiter.release.value = 0.25;
+    music.master.connect(limiter).connect(music.ctx.destination);
   }
   if (music.ctx.state === "suspended" && !music.paused) music.ctx.resume();
   return music.ctx;
@@ -743,14 +753,22 @@ function musicCtx() {
 const musicVol = () => ((state.settings.musicVolume ?? 50) / 100) ** 1.5 * 0.9;
 
 function noiseBuffer(ctx, kind, seconds = 6) {
-  const len = Math.floor(ctx.sampleRate * seconds), buf = ctx.createBuffer(2, len, ctx.sampleRate);
+  // Generates noise and crossfades the end into the start so the loop point is seamless (no click).
+  const sr = ctx.sampleRate, len = Math.floor(sr * seconds), fade = Math.floor(sr * Math.min(0.5, seconds / 4));
+  const buf = ctx.createBuffer(2, len, sr);
   for (let ch = 0; ch < 2; ch++) {
-    const d = buf.getChannelData(ch);
+    const raw = new Float32Array(len + fade);
     let last = 0, b0 = 0, b1 = 0, b2 = 0;
-    for (let i = 0; i < len; i++) {
+    for (let i = 0; i < raw.length; i++) {
       const w = Math.random() * 2 - 1;
-      if (kind === "brown") { last = (last + 0.02 * w) / 1.02; d[i] = last * 3.5; }
-      else { b0 = 0.997 * b0 + w * 0.029591; b1 = 0.985 * b1 + w * 0.032534; b2 = 0.95 * b2 + w * 0.048056; d[i] = (b0 + b1 + b2 + w * 0.05) * 0.9; }
+      if (kind === "brown") { last = (last + 0.02 * w) / 1.02; raw[i] = last * 3.5; }
+      else { b0 = 0.997 * b0 + w * 0.029591; b1 = 0.985 * b1 + w * 0.032534; b2 = 0.95 * b2 + w * 0.048056; raw[i] = (b0 + b1 + b2 + w * 0.05) * 0.9; }
+    }
+    const d = buf.getChannelData(ch);
+    for (let i = 0; i < len; i++) d[i] = raw[i];
+    for (let i = 0; i < fade; i++) {                       // equal-power crossfade
+      const x = i / fade;
+      d[i] = raw[i] * Math.sin(x * Math.PI / 2) + raw[len + i] * Math.cos(x * Math.PI / 2);
     }
   }
   return buf;
@@ -780,11 +798,11 @@ const TRACK_BUILDERS = {
   rain(ctx, out) {
     const src = loopNoise(ctx, "pink");
     const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 350;
-    const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 5200;
+    const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 3000;
     const g = ctx.createGain(); fadeIn(ctx, g, 0.4);
     src.connect(hp).connect(lp).connect(g).connect(out); src.start();
     // occasional soft droplets
-    const drops = ctx.createGain(); drops.gain.value = 0.12; drops.connect(out);
+    const drops = ctx.createGain(); drops.gain.value = 0.045; drops.connect(out);
     const dropBuf = noiseBuffer(ctx, "pink", 0.05);
     const timer = setInterval(() => {
       const now = ctx.currentTime;
@@ -792,11 +810,11 @@ const TRACK_BUILDERS = {
         if (Math.random() > 0.55) continue;
         const t = now + Math.random() * 0.4;
         const d = ctx.createBufferSource(); d.buffer = dropBuf;
-        const bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = 2500 + Math.random() * 3500; bp.Q.value = 6;
+        const bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = 1200 + Math.random() * 1800; bp.Q.value = 4;
         const dg = ctx.createGain();
-        dg.gain.setValueAtTime(0.0001, t); dg.gain.exponentialRampToValueAtTime(0.4 + Math.random() * 0.6, t + 0.002);
-        dg.gain.exponentialRampToValueAtTime(0.0001, t + 0.03);
-        d.connect(bp).connect(dg).connect(drops); d.start(t); d.stop(t + 0.05);
+        dg.gain.setValueAtTime(0.0001, t); dg.gain.exponentialRampToValueAtTime(0.3 + Math.random() * 0.5, t + 0.008);
+        dg.gain.exponentialRampToValueAtTime(0.0001, t + 0.06);
+        d.connect(bp).connect(dg).connect(drops); d.start(t); d.stop(t + 0.08);
       }
     }, 400);
     return () => { clearInterval(timer); src.stop(); };
@@ -825,7 +843,7 @@ const TRACK_BUILDERS = {
     let i = 0;
     const play = () => {
       const t = ctx.currentTime;
-      voices.splice(0).forEach(({ o, g }) => { g.gain.cancelScheduledValues(t); g.gain.setValueAtTime(g.gain.value, t); g.gain.linearRampToValueAtTime(0, t + 5); o.stop(t + 5.1); });
+      voices.splice(0).forEach(({ o, g }) => { g.gain.cancelScheduledValues(t); g.gain.setValueAtTime(g.gain.value, t); g.gain.linearRampToValueAtTime(0, t + 5); o.stop(t + 5.1); o.onended = () => { o.disconnect(); g.disconnect(); }; });
       for (const m of chords[i++ % chords.length]) for (const det of [-6, 6]) {
         const o = ctx.createOscillator(); o.type = "triangle";
         o.frequency.value = 440 * 2 ** ((m - 69) / 12); o.detune.value = det;
@@ -846,21 +864,20 @@ const TRACK_BUILDERS = {
     const bus = ctx.createGain(); fadeIn(ctx, bus, 0.85, 2); tone.connect(bus).connect(out);
     // gentle tape wobble
     const wob = ctx.createOscillator(); wob.frequency.value = 0.4; const wobG = ctx.createGain(); wobG.gain.value = 6; wob.connect(wobG); wob.start();
-    // vinyl crackle
-    const crk = ctx.createBufferSource(); const cb = ctx.createBuffer(1, ctx.sampleRate * 4, ctx.sampleRate); const cd = cb.getChannelData(0);
-    for (let i = 0; i < cd.length; i++) cd[i] = Math.random() < 0.0006 ? (Math.random() * 2 - 1) : (Math.random() * 2 - 1) * 0.01;
-    crk.buffer = cb; crk.loop = true; const ch = ctx.createBiquadFilter(); ch.type = "highpass"; ch.frequency.value = 1500;
-    const cg = ctx.createGain(); cg.gain.value = 0.18; crk.connect(ch).connect(cg).connect(out); crk.start();
-
     const key = (midi, t, len, vel) => {
       const f = 440 * 2 ** ((midi - 69) / 12);
       const g = ctx.createGain(); g.connect(tone);
-      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vel, t + 0.015);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vel, t + 0.02);
       g.gain.exponentialRampToValueAtTime(vel * 0.35, t + 0.6); g.gain.exponentialRampToValueAtTime(0.0001, t + len);
-      for (const [mult, amp] of [[1, 1], [2, 0.18], [3, 0.05]]) {
+      [[1, 1], [2, 0.18], [3, 0.05]].forEach(([mult, amp], idx) => {
         const o = ctx.createOscillator(); o.type = "sine"; o.frequency.value = f * mult; wobG.connect(o.detune);
         const a = ctx.createGain(); a.gain.value = amp; o.connect(a).connect(g); o.start(t); o.stop(t + len + 0.05);
-      }
+        o.onended = () => {                                  // free finished notes so long sessions stay smooth
+          try { wobG.disconnect(o.detune); } catch {}
+          o.disconnect(); a.disconnect();
+          if (idx === 0) g.disconnect();
+        };
+      });
     };
     let next = ctx.currentTime + 0.3, step = 0;
     const schedule = () => {
@@ -878,7 +895,7 @@ const TRACK_BUILDERS = {
     };
     schedule();
     const timer = setInterval(schedule, 250);
-    return () => { clearInterval(timer); crk.stop(); wob.stop(); };
+    return () => { clearInterval(timer); wob.stop(); };
   },
 };
 
@@ -974,7 +991,7 @@ $("#musicStop").addEventListener("click", stopAllMusic);
 
 const GRADE_POINTS = { "A+": 4.0, A: 4.0, "A-": 3.7, "B+": 3.3, B: 3.0, "B-": 2.7, "C+": 2.3, C: 2.0, "C-": 1.7, "D+": 1.3, D: 1.0, "D-": 0.7, F: 0 };
 
-const pomo = { mode: "focus", left: null, running: false, timer: null, count: 0 };
+const pomo = { mode: "focus", left: null, running: false, timer: null, endAt: 0, count: 0, widgetHidden: false, alarm: null };
 
 const toolsUi = { open: null };
 
@@ -988,7 +1005,7 @@ const TOOL_LIST = [
 ];
 
 function toolSubtitle(id) {
-  if (id === "timer") return pomo.running ? `<span id="hubTimer">${pomoLabel()}</span> · ${pomo.mode === "focus" ? "focusing" : "on a break"}` : "25-minute focus sessions with breaks";
+  if (id === "timer") return pomoInProgress() ? `<span id="hubTimer">${pomoLabel()}</span> · ${pomo.running ? (pomo.mode === "focus" ? "focusing" : "on a break") : "paused"}` : `${state.pomodoro.focus}-minute focus sessions with breaks`;
   if (id === "music") return `<span id="hubMusic">${musicStatus() || "Lo-fi, rain, waves and more"}</span>`;
   if (id === "final") return "What score do I need?";
   if (id === "gpa") return state.gpa.courses.length ? `${plural(state.gpa.courses.length, "course")}` : "Semester and cumulative";
@@ -1002,6 +1019,7 @@ function openTool(id) { toolsUi.open = id; sfx("click"); renderTools(); window.s
 function renderTools() {
   const v = $("#view-tools");
   if (!toolsUi.open) {
+    queueMicrotask(updateTimerWidget);
     v.innerHTML = `
       <div class="page-head"><h1>Tools</h1></div>
       <div class="card list-card menu">
@@ -1018,6 +1036,7 @@ function renderTools() {
       </div>`;
     return;
   }
+  updateTimerWidget();
   const t = TOOL_LIST.find((x) => x.id === toolsUi.open) || { name: "Settings" };
   v.innerHTML = `
     <button class="back-btn" data-action="tools-back">‹ Tools</button>
@@ -1035,7 +1054,7 @@ const TOOL_PAGES = {
     if (pomo.left == null) pomo.left = p[pomo.mode] * 60;
     const todayCount = p.history[dateKey(new Date())] || 0;
     return `<div class="card timer big">
-      <div class="mode-pills">
+      <div class="mode-pills" data-mode="${pomo.mode}"><span class="pill-slider"></span>
         ${["focus", "short", "long"].map((m) => `<button data-action="pomo-mode" data-mode="${m}" class="${pomo.mode === m ? "active" : ""}">${{ focus: "Focus", short: "Break", long: "Long break" }[m]}</button>`).join("")}
       </div>
       <div class="ring">
@@ -1044,7 +1063,7 @@ const TOOL_PAGES = {
         <div class="time" id="pomoTime">00:00</div>
       </div>
       <div class="row" style="justify-content:center;margin-top:1.4rem">
-        <button class="btn primary" data-action="pomo-start" style="flex:none;min-width:7rem" id="pomoStart">${pomo.running ? "Pause" : "Start"}</button>
+        <button class="btn primary" data-action="pomo-start" style="flex:none;min-width:7rem" id="pomoStart">Start</button>
         <button class="btn ghost" data-action="pomo-reset" style="flex:none">Reset</button>
       </div>
       <div class="small muted" style="margin-top:1rem">${todayCount ? `${plural(todayCount, "session")} today` : "Focus for a while, then take a short break."}</div>
@@ -1162,6 +1181,9 @@ const TOOL_PAGES = {
       <div class="setting-row"><span class="lbl">Click sounds</span>
         <label class="switch"><input type="checkbox" id="setSounds" ${s.sounds === false ? "" : "checked"}/><span></span></label></div>
       ${s.sounds === false ? "" : `<div class="setting-row"><span class="lbl muted">Click volume</span><input type="range" id="setVolume" min="0" max="100" value="${s.volume ?? 60}" style="max-width:200px"/></div>`}
+      <div class="setting-row"><span class="lbl">Timer alarm <button class="text-btn" data-action="test-alarm">Test</button></span>
+        <label class="switch"><input type="checkbox" id="setAlarm" ${s.alarm === false ? "" : "checked"}/><span></span></label></div>
+      ${s.alarm === false ? "" : `<div class="setting-row"><span class="lbl muted">Alarm volume</span><input type="range" id="setAlarmVol" min="10" max="100" value="${s.alarmVolume ?? 90}" style="max-width:200px"/></div>`}
     </div>
     <div class="section-title">Your data</div>
     <div class="card settings">
@@ -1205,56 +1227,177 @@ function calcGpa() {
 }
 
 /* ---- Pomodoro ---- */
-const pomoLabel = () => `${pad(Math.floor(pomo.left / 60))}:${pad(pomo.left % 60)}`;
+const MODE_NAMES = { focus: "Focus", short: "Break", long: "Long break" };
+const pomoTotal = () => state.pomodoro[pomo.mode] * 60;
+const pomoLabel = () => { const l = Math.max(0, pomo.left ?? pomoTotal()); return `${pad(Math.floor(l / 60))}:${pad(l % 60)}`; };
+const pomoInProgress = () => pomo.running || (pomo.left != null && pomo.left < pomoTotal() && pomo.left > 0);
+
 function updatePomoDisplay() {
-  const hub = $("#hubTimer"); if (hub) hub.textContent = pomoLabel();
-  const el = $("#pomoTime");
-  const total = state.pomodoro[pomo.mode] * 60;
-  if (pomo.left == null) pomo.left = total;
-  const m = Math.floor(pomo.left / 60), s = pomo.left % 60;
-  const label = `${pad(m)}:${pad(s)}`;
-  if (pomo.running) document.title = `${label} · ${pomo.mode === "focus" ? "Focus" : "Break"} — College Tracker`;
-  if (!el) return;
-  el.textContent = label;
+  if (pomo.left == null) pomo.left = pomoTotal();
+  const label = pomoLabel(), total = pomoTotal();
+  document.title = pomo.running ? `${label} · ${MODE_NAMES[pomo.mode]} · College Tracker` : "College Tracker";
+  const hub = $("#hubTimer"); if (hub) hub.textContent = label;
+  const el = $("#pomoTime"); if (el) el.textContent = label;
   const ring = $("#pomoRing");
   if (ring) {
     ring.style.strokeDashoffset = String(289 * (1 - pomo.left / total));
-    ring.style.stroke = pomo.mode === "focus" ? "var(--lavender)" : "var(--bisque)";
+    ring.style.stroke = pomo.mode === "focus" ? "var(--lavender)" : "var(--bisque-strong)";
   }
-  const btn = $("#pomoStart");
-  if (btn) btn.textContent = pomo.running ? "Pause" : "Start";
+  const btn = $("#pomoStart"); if (btn) btn.textContent = pomo.running ? "Pause" : pomo.left < total ? "Resume" : "Start";
+  // keep the Focus / Break / Long break pills in sync
+  $$('[data-action="pomo-mode"]').forEach((b) => b.classList.toggle("active", b.dataset.mode === pomo.mode));
+  const pills = $(".mode-pills"); if (pills) pills.dataset.mode = pomo.mode;
+  updateTimerWidget();
+}
+
+function startPomo() {
+  if (pomo.left == null || pomo.left <= 0) pomo.left = pomoTotal();
+  pomo.running = true;
+  pomo.endAt = Date.now() + pomo.left * 1000;
+  pomo.widgetHidden = false;
+  clearInterval(pomo.timer);
+  pomo.timer = setInterval(pomoTick, 500);
+  scheduleAlarm(pomo.left);
+  updatePomoDisplay();
+}
+
+function stopPomo() {
+  if (pomo.running) pomo.left = Math.max(0, Math.ceil((pomo.endAt - Date.now()) / 1000));
+  pomo.running = false;
+  clearInterval(pomo.timer);
+  cancelAlarm();
+  updatePomoDisplay();
+}
+
+function setPomoMode(mode) {
+  stopPomo();
+  pomo.mode = mode;
+  pomo.left = pomoTotal();
+  updatePomoDisplay();
 }
 
 function pomoTick() {
-  pomo.left--;
-  if (pomo.left <= 0) {
-    chime();
-    if (pomo.mode === "focus") {
-      const k = dateKey(new Date());
-      state.pomodoro.history[k] = (state.pomodoro.history[k] || 0) + 1;
-      pomo.count++;
-      save();
-      notify("Focus session done 🍅", "Nice! Take a break.");
-      setPomoMode(pomo.count % 4 === 0 ? "long" : "short", true);
-    } else {
-      notify("Break's over", "Ready for another focus session?");
-      setPomoMode("focus", false);
-    }
-    if (currentTab === "tools") renderTools();
-    return;
+  if (!pomo.running) return;
+  pomo.left = Math.max(0, Math.ceil((pomo.endAt - Date.now()) / 1000));
+  if (pomo.left > 0) return updatePomoDisplay();
+  // finished
+  pomo.running = false;
+  clearInterval(pomo.timer);
+  if (!pomo.alarm || pomo.alarm.when > alarmClock() + 1) { cancelAlarm(); ringAlarm(0); }   // ring now if it wasn't pre-scheduled
+  const finished = pomo.mode;
+  let next = "focus";
+  if (finished === "focus") {
+    const k = dateKey(new Date());
+    state.pomodoro.history[k] = (state.pomodoro.history[k] || 0) + 1;
+    pomo.count++;
+    save();
+    next = pomo.count % 4 === 0 ? "long" : "short";
   }
+  pomo.mode = next;
+  pomo.left = pomoTotal();
   updatePomoDisplay();
+  showAlarmCard(finished, next);
+  notify(finished === "focus" ? "Focus session done" : "Break's over", finished === "focus" ? "Nice work. Time for a break." : "Ready to focus again?");
+  if (currentTab === "tools") renderTools();
 }
 
-function setPomoMode(mode, keepRunning) {
-  pomo.mode = mode;
-  pomo.left = state.pomodoro[mode] * 60;
-  if (!keepRunning) stopPomo();
-  updatePomoDisplay();
-}
-function stopPomo() { pomo.running = false; clearInterval(pomo.timer); document.title = "College Tracker"; }
+// Catch up immediately when the window comes back to the front.
+document.addEventListener("visibilitychange", () => { if (!document.hidden && pomo.running) pomoTick(); });
 
-const chime = () => sfx("timer");
+/* ---- Alarm: a loud ringing bell, scheduled on the audio clock so it's on time even in the background ---- */
+let alarmCtx = null;
+const alarmClock = () => (alarmCtx ? alarmCtx.currentTime : 0);
+
+function getAlarmCtx() {
+  try {
+    alarmCtx = alarmCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (alarmCtx.state === "suspended") alarmCtx.resume();
+  } catch { alarmCtx = null; }
+  return alarmCtx;
+}
+
+function bellStrike(ctx, out, t, f, loud) {
+  // A bright alarm bell: a few bell-like partials with a quick metallic decay.
+  for (const [ratio, amp, decay] of [[1, 1, 0.9], [2.0, 0.5, 0.6], [2.76, 0.45, 0.45], [5.4, 0.2, 0.25]]) {
+    const o = ctx.createOscillator(); o.type = "sine"; o.frequency.value = f * ratio;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(amp * loud, t + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + decay);
+    o.connect(g).connect(out); o.start(t); o.stop(t + decay + 0.05);
+  }
+}
+
+function scheduleAlarm(secondsFromNow) {
+  cancelAlarm();
+  const ctx = getAlarmCtx(); if (!ctx) return;
+  pomo.alarm = ringAlarm(secondsFromNow);
+}
+
+function ringAlarm(secondsFromNow) {
+  const ctx = getAlarmCtx(); if (!ctx) return null;
+  if (state.settings.alarm === false) return { when: ctx.currentTime + secondsFromNow, out: null };
+  const vol = (state.settings.alarmVolume ?? 90) / 100;
+  const limiter = ctx.createDynamicsCompressor();
+  limiter.threshold.value = -6; limiter.ratio.value = 12; limiter.attack.value = 0.002; limiter.release.value = 0.2;
+  const out = ctx.createGain(); out.gain.value = vol * 0.9;
+  out.connect(limiter).connect(ctx.destination);
+  const when = ctx.currentTime + Math.max(0.05, secondsFromNow);
+  // "ring-ring" pattern: 4 bursts of rapid strikes over ~8 seconds
+  for (let burst = 0; burst < 4; burst++) {
+    for (let i = 0; i < 8; i++) {
+      bellStrike(ctx, out, when + burst * 2 + i * 0.075, i % 2 ? 1318.5 : 1568, 0.5);
+    }
+  }
+  const alarm = { when, out };
+  pomo.alarm = alarm;
+  return alarm;
+}
+
+function cancelAlarm() {
+  if (pomo.alarm && pomo.alarm.out) {
+    try {
+      const g = pomo.alarm.out.gain, t = alarmClock();
+      g.cancelScheduledValues(t); g.setValueAtTime(g.value, t); g.linearRampToValueAtTime(0, t + 0.05);
+      const out = pomo.alarm.out; setTimeout(() => out.disconnect(), 100);
+    } catch {}
+  }
+  pomo.alarm = null;
+}
+
+function showAlarmCard(finished, next) {
+  const card = $("#alarmCard");
+  $("#alarmTitle").textContent = finished === "focus" ? "Focus session done" : "Break's over";
+  $("#alarmText").textContent = finished === "focus" ? `Nice work. Take a ${next === "long" ? "longer " : ""}break.` : "Ready for another focus session?";
+  $("#alarmNext").textContent = `Start ${MODE_NAMES[next].toLowerCase()}`;
+  card.hidden = false;
+  $("#alarmStop").focus();
+}
+function hideAlarmCard() { $("#alarmCard").hidden = true; cancelAlarm(); }
+$("#alarmStop").addEventListener("click", () => { hideAlarmCard(); });
+$("#alarmNext").addEventListener("click", () => { hideAlarmCard(); startPomo(); sfx("button"); });
+
+/* ---- Floating mini timer, visible everywhere except the timer page ---- */
+function updateTimerWidget() {
+  const w = $("#timerWidget"); if (!w) return;
+  const onTimerPage = currentTab === "tools" && toolsUi.open === "timer";
+  w.hidden = !pomoInProgress() || pomo.widgetHidden || onTimerPage;
+  if (w.hidden) return;
+  $("#twTime").textContent = pomoLabel();
+  $("#twMode").textContent = pomo.running ? MODE_NAMES[pomo.mode] : `${MODE_NAMES[pomo.mode]} · paused`;
+  $("#twToggle").innerHTML = pomo.running ? PAUSE_ICON : PLAY_ICON;
+  $("#twToggle").setAttribute("aria-label", pomo.running ? "Pause timer" : "Resume timer");
+  w.style.setProperty("--p", String(1 - pomo.left / pomoTotal()));
+  w.classList.toggle("break", pomo.mode !== "focus");
+}
+const PLAY_ICON = '<svg viewBox="0 0 16 16" width="12" height="12"><path d="M4 2.5v11l9-5.5z" fill="currentColor"/></svg>';
+const PAUSE_ICON = '<svg viewBox="0 0 16 16" width="12" height="12"><path d="M4 2.5h3v11H4zM9 2.5h3v11H9z" fill="currentColor"/></svg>';
+$("#twToggle").addEventListener("click", (e) => { e.stopPropagation(); pomo.running ? stopPomo() : startPomo(); sfx("button"); if (currentTab === "tools" && !toolsUi.open) renderTools(); });
+$("#twReset").addEventListener("click", (e) => { e.stopPropagation(); setPomoMode(pomo.mode); sfx("click"); });
+$("#twClose").addEventListener("click", (e) => { e.stopPropagation(); pomo.widgetHidden = true; updateTimerWidget(); toast(pomo.running ? "Timer still running. Find it in Tools" : "Timer hidden"); });
+$("#twOpen").addEventListener("click", () => { toolsUi.open = "timer"; showTab("tools"); window.scrollTo({ top: 0 }); });
+
+const chime = () => {};
 
 /* ================= Alerts & notifications ================= */
 
@@ -1343,14 +1486,13 @@ document.addEventListener("click", (e) => {
     case "enable-notifs": return enableNotifications();
     case "dismiss-notif-banner": state.settings.dismissedNotifBanner = true; save(); return render();
     case "test-notif": notify("Test reminder", "This is what a heads-up looks like."); return;
-    case "pomo-mode": return setPomoMode(el.dataset.mode, false);
+    case "pomo-mode": sfx("click"); return setPomoMode(el.dataset.mode);
     case "pomo-start":
-      if (pomo.running) stopPomo();
-      else { pomo.running = true; pomo.timer = setInterval(pomoTick, 1000); }
+      pomo.running ? stopPomo() : startPomo();
       sfx("button");
       if (currentTab === "tools" && !toolsUi.open) renderTools();
-      return updatePomoDisplay();
-    case "pomo-reset": return setPomoMode(pomo.mode, false);
+      return;
+    case "pomo-reset": sfx("click"); return setPomoMode(pomo.mode);
     case "gpa-add": state.gpa.courses.push({ name: "", credits: "3", grade: "A" }); save(); return renderTools();
     case "gpa-remove": state.gpa.courses.splice(Number(el.dataset.i), 1); save(); return renderTools();
     case "gpa-import":
@@ -1365,6 +1507,7 @@ document.addEventListener("click", (e) => {
       });
     case "link-remove": state.links.splice(Number(el.dataset.i), 1); save(); return renderTools();
     case "export": return exportData();
+    case "test-alarm": { const a = ringAlarm(0); setTimeout(() => { if (pomo.alarm === a) cancelAlarm(); }, 2200); return; }
     case "open-tool": return openTool(el.dataset.tool);
     case "tools-back": toolsUi.open = null; sfx("click"); return renderTools();
     case "track": return toggleTrack(el.dataset.track);
@@ -1392,13 +1535,16 @@ document.addEventListener("change", (e) => {
     const v = Math.max(1, Math.min(120, parseInt(t.value) || 1));
     state.pomodoro[t.dataset.pomo] = v; save();
     if (!pomo.running && pomo.mode === t.dataset.pomo) { pomo.left = v * 60; updatePomoDisplay(); }
+    t.value = v;
   }
   if (t.id === "setSounds") { state.settings.sounds = t.checked; save(); if (t.checked) sfx("complete"); renderTools(); }
   if (t.id === "setNotifs") { if (t.checked) enableNotifications(); else { state.settings.notifications = false; save(); renderTools(); } }
+  if (t.id === "setAlarm") { state.settings.alarm = t.checked; save(); renderTools(); }
+  if (t.id === "setAlarmVol") { state.settings.alarmVolume = Number(t.value); save(); }
   if (t.id === "setVolume") { state.settings.volume = Number(t.value); save(); sfx("complete"); }
   if (t.id === "setAlert") { state.settings.alertHours = Number(t.value); save(); checkAlerts(); }
   if (t.id === "setTheme") { state.settings.theme = t.value; save(); applyTheme(); }
-  if (t.id === "importFile" && t.files[0]) importData(t.files[0]);
+  if (t.id === "importFile" && t.files[0]) { importData(t.files[0]); t.value = ""; }
 });
 
 function exportData() {
@@ -1426,7 +1572,8 @@ function importData(file) {
 
 // Keyboard shortcuts: n = new assignment, e = new exam, 1-5 = tabs
 document.addEventListener("keydown", (e) => {
-  if (e.target.closest("input, textarea, select, dialog") || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.target.closest("input, textarea, select, dialog[open], .alarm-card:not([hidden])") || e.metaKey || e.ctrlKey || e.altKey) return;
+  if ($("#formDialog").open || !$("#alarmCard").hidden) return;
   const tabs = ["dashboard", "classes", "exams", "calendar", "tools"];
   if (e.key >= "1" && e.key <= "5") showTab(tabs[Number(e.key) - 1]);
   else if (e.key === "n") { e.preventDefault(); editAssignment(); }
@@ -1474,6 +1621,7 @@ if ("serviceWorker" in navigator && location.protocol !== "file:") {
 
 function render() {
   if (typeof firstAlertCheck !== "undefined") updateBadge();
+  queueMicrotask(updateTimerWidget);
   ({ dashboard: renderDashboard, classes: renderClasses, exams: renderExams, calendar: renderCalendar, tools: renderTools })[currentTab]();
 }
 
